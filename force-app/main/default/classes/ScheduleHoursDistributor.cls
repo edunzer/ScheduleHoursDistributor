@@ -1,9 +1,9 @@
 public with sharing class ScheduleHoursDistributor {
     
     @InvocableMethod(label='Generate Schedule Exceptions' description='Calculates and returns Schedule Exception records without inserting them.')
-    public static List<ScheduleExceptionOutput> generateScheduleExceptions(List<ScheduleInput> inputList) {
+    public static List<ScheduleExceptionOutputWrapper> generateScheduleExceptions(List<ScheduleInput> inputList) {
         if (inputList.isEmpty()) {
-            return new List<ScheduleExceptionOutput>();
+            return new List<ScheduleExceptionOutputWrapper>();
         }
 
         ScheduleInput input = inputList[0];
@@ -22,21 +22,14 @@ public with sharing class ScheduleHoursDistributor {
         // Step 3: Generate schedule exception records
         List<pse__Schedule_Exception__c> exceptions = generateExceptions(input, categoryWeeks, hoursPerWeek);
 
-        // Convert to output wrapper for Flow
-        List<ScheduleExceptionOutput> outputList = new List<ScheduleExceptionOutput>();
-        for (pse__Schedule_Exception__c ex : exceptions) {
-            ScheduleExceptionOutput outputRecord = new ScheduleExceptionOutput();
-            outputRecord.scheduleException = ex;
-            outputList.add(outputRecord);
-        }
-
-        return outputList;
+        // Step 4: Wrap the list and return as a collection variable
+        return new List<ScheduleExceptionOutputWrapper>{ new ScheduleExceptionOutputWrapper(exceptions) };
     }
 
     // Calculate hours per week based on provided percentages
     private static Map<String, Decimal> calculateHoursPerWeek(ScheduleInput input, Map<String, Decimal> categoryWeeks) {
         Decimal totalHours = input.numberOfHours;
-        Decimal totalWeeks = input.cat1Weeks + input.cat2Weeks + input.cat3Weeks + input.postWeeks; // Sum of provided weeks
+        Decimal totalWeeks = input.cat1Weeks + input.cat2Weeks + input.cat3Weeks + input.postWeeks;
         return new Map<String, Decimal>{
             'Cat1' => (totalHours * (input.cat1Percentage / 100)) / totalWeeks,
             'Cat2' => (totalHours * (input.cat2Percentage / 100)) / totalWeeks,
@@ -103,10 +96,14 @@ public with sharing class ScheduleHoursDistributor {
         );
     }
 
-    // Wrapper class to expose the output collection to Flow
-    public class ScheduleExceptionOutput {
-        @InvocableVariable(label='Schedule Exception Record' description='Generated Schedule Exception record')
-        public pse__Schedule_Exception__c scheduleException;
+    // Wrapper class to properly expose output collection for Flow
+    public class ScheduleExceptionOutputWrapper {
+        @InvocableVariable(label='Schedule Exceptions' description='List of Schedule Exception records')
+        public List<pse__Schedule_Exception__c> scheduleExceptions;
+
+        public ScheduleExceptionOutputWrapper(List<pse__Schedule_Exception__c> exceptions) {
+            this.scheduleExceptions = exceptions;
+        }
     }
 
     // Invocable Variable Class for Flow Inputs
