@@ -31,10 +31,10 @@ public with sharing class ScheduleHoursDistributor {
         Decimal totalHours = input.numberOfHours;
         Decimal totalWeeks = input.cat1Weeks + input.cat2Weeks + input.cat3Weeks + input.postWeeks;
         return new Map<String, Decimal>{
-            'Cat1' => (totalHours * (input.cat1Percentage / 100)) / totalWeeks,
-            'Cat2' => (totalHours * (input.cat2Percentage / 100)) / totalWeeks,
-            'Cat3' => (totalHours * (input.cat3Percentage / 100)) / totalWeeks,
-            'Post' => (totalHours * (input.postPercentage / 100)) / totalWeeks
+            'Cat1' => (totalHours * (input.cat1Percentage / 100)) / input.cat1Weeks,
+            'Cat2' => (totalHours * (input.cat2Percentage / 100)) / input.cat2Weeks,
+            'Cat3' => (totalHours * (input.cat3Percentage / 100)) / input.cat3Weeks,
+            'Post' => (totalHours * (input.postPercentage / 100)) / input.postWeeks
         };
     }
 
