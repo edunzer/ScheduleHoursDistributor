@@ -8,21 +8,37 @@ public with sharing class ScheduleHoursDistributor {
 
         ScheduleInput input = inputList[0];
 
-        // Step 1: Calculate total number of weeks (sum of all category weeks)
+        // Step 1: Ensure all category week values are valid (default to zero)
+        input.cat1Weeks = (input.cat1Weeks == null) ? 0 : input.cat1Weeks;
+        input.cat2Weeks = (input.cat2Weeks == null) ? 0 : input.cat2Weeks;
+        input.cat3Weeks = (input.cat3Weeks == null) ? 0 : input.cat3Weeks;
+        input.postWeeks = (input.postWeeks == null) ? 0 : input.postWeeks;
+
+        input.cat1Percentage = (input.cat1Percentage == null) ? 0 : input.cat1Percentage;
+        input.cat2Percentage = (input.cat2Percentage == null) ? 0 : input.cat2Percentage;
+        input.cat3Percentage = (input.cat3Percentage == null) ? 0 : input.cat3Percentage;
+        input.postPercentage = (input.postPercentage == null) ? 0 : input.postPercentage;
+
+        // Step 2: Calculate total number of weeks
         Decimal totalWeeks = input.cat1Weeks + input.cat2Weeks + input.cat3Weeks + input.postWeeks;
 
-        // Step 2: Calculate hours per week for each category
-        Decimal hoursPerWeekCat1 = (input.cat1Percentage / 100) * input.numberOfHours / input.cat1Weeks;
-        Decimal hoursPerWeekCat2 = (input.cat2Percentage / 100) * input.numberOfHours / input.cat2Weeks;
-        Decimal hoursPerWeekCat3 = (input.cat3Percentage / 100) * input.numberOfHours / input.cat3Weeks;
-        Decimal hoursPerWeekPost = (input.postPercentage / 100) * input.numberOfHours / input.postWeeks;
+        // Avoid processing if all weeks are zero
+        if (totalWeeks == 0 || input.numberOfHours == null || input.numberOfHours == 0) {
+            return new List<ScheduleExceptionOutputWrapper>();
+        }
 
-        // Step 3: Generate schedule exception records
+        // Step 3: Calculate hours per week for each category, ensuring no division by zero
+        Decimal hoursPerWeekCat1 = (input.cat1Weeks > 0) ? ((input.cat1Percentage / 100) * input.numberOfHours) / input.cat1Weeks : 0;
+        Decimal hoursPerWeekCat2 = (input.cat2Weeks > 0) ? ((input.cat2Percentage / 100) * input.numberOfHours) / input.cat2Weeks : 0;
+        Decimal hoursPerWeekCat3 = (input.cat3Weeks > 0) ? ((input.cat3Percentage / 100) * input.numberOfHours) / input.cat3Weeks : 0;
+        Decimal hoursPerWeekPost = (input.postWeeks > 0) ? ((input.postPercentage / 100) * input.numberOfHours) / input.postWeeks : 0;
+
+        // Step 4: Generate schedule exception records
         List<pse__Schedule_Exception__c> exceptions = generateExceptions(
             input, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost
         );
 
-        // Step 4: Wrap and return with calculated hours per category
+        // Step 5: Wrap and return with calculated hours per category
         return new List<ScheduleExceptionOutputWrapper>{ 
             new ScheduleExceptionOutputWrapper(exceptions, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost)
         };
@@ -70,8 +86,8 @@ public with sharing class ScheduleHoursDistributor {
                 allocatedPostWeeks++;
             }
 
-            // Step 5: Distribute hours per week across workdays
-            Decimal hoursPerDay = hoursPerWeek / input.numberOfWorkDays;
+            // Step 5: Ensure numberOfWorkDays is valid before dividing
+            Decimal hoursPerDay = (input.numberOfWorkDays != null && input.numberOfWorkDays > 0) ? hoursPerWeek / input.numberOfWorkDays : 0;
 
             // Create schedule exception record
             exceptions.add(createScheduleException(input.scheduleId, currentStartDate, currentEndDate, input.numberOfWorkDays, hoursPerDay));
