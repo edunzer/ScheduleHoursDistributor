@@ -34,10 +34,10 @@ public with sharing class ScheduleHoursDistributor {
         Set<Date> holidayDates = extractHolidayDates(input.existingExceptions);
 
         // Step 4: Calculate hours per week for each category, ensuring no division by zero
-        Decimal hoursPerWeekCat1 = (input.cat1Weeks > 0) ? ((input.cat1Percentage / 100) * input.numberOfHours) / input.cat1Weeks : 0;
-        Decimal hoursPerWeekCat2 = (input.cat2Weeks > 0) ? ((input.cat2Percentage / 100) * input.numberOfHours) / input.cat2Weeks : 0;
-        Decimal hoursPerWeekCat3 = (input.cat3Weeks > 0) ? ((input.cat3Percentage / 100) * input.numberOfHours) / input.cat3Weeks : 0;
-        Decimal hoursPerWeekPost = (input.postWeeks > 0) ? ((input.postPercentage / 100) * input.numberOfHours) / input.postWeeks : 0;
+        Decimal hoursPerWeekCat1 = (input.cat1Weeks > 0) ? (input.cat1Percentage * input.numberOfHours) / input.cat1Weeks : 0;
+        Decimal hoursPerWeekCat2 = (input.cat2Weeks > 0) ? (input.cat2Percentage * input.numberOfHours) / input.cat2Weeks : 0;
+        Decimal hoursPerWeekCat3 = (input.cat3Weeks > 0) ? (input.cat3Percentage * input.numberOfHours) / input.cat3Weeks : 0;
+        Decimal hoursPerWeekPost = (input.postWeeks > 0) ? (input.postPercentage * input.numberOfHours) / input.postWeeks : 0;
 
         // Step 5: Generate schedule exception records with holiday handling
         List<pse__Schedule_Exception__c> exceptions = generateExceptions(
