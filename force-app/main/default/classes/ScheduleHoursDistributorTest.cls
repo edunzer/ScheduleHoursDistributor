@@ -44,6 +44,12 @@ public with sharing class ScheduleHoursDistributorTest {
         System.assertNotEquals(null, results[0].scheduleExceptions, 'Schedule Exceptions list should not be null');
         System.assert(results[0].scheduleExceptions.size() > 0, 'Should create schedule exceptions');
 
+        // Debug Logs for Hours Per Week
+        System.debug('Cat1 Hours Per Week: ' + results[0].hoursPerWeekCat1);
+        System.debug('Cat2 Hours Per Week: ' + results[0].hoursPerWeekCat2);
+        System.debug('Cat3 Hours Per Week: ' + results[0].hoursPerWeekCat3);
+        System.debug('Post Hours Per Week: ' + results[0].hoursPerWeekPost);
+
         // Validate calculated hours per category (rounded)
         System.assertEquals(6.25, Math.round(results[0].hoursPerWeekCat1), 'Cat1 hours per week should match expected value');
         System.assertEquals(7.50, Math.round(results[0].hoursPerWeekCat2), 'Cat2 hours per week should match expected value');
