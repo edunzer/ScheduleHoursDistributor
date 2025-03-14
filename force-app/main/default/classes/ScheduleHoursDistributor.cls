@@ -159,17 +159,22 @@ public with sharing class ScheduleHoursDistributor {
     public class ScheduleExceptionOutputWrapper {
         @InvocableVariable(label='Schedule Exceptions' description='List of Schedule Exception records')
         public List<pse__Schedule_Exception__c> scheduleExceptions;
+    
         @InvocableVariable(label='Hours Per Week - Cat1' description='Calculated hours per week for Category 1')
         public Decimal hoursPerWeekCat1;
+    
         @InvocableVariable(label='Hours Per Week - Cat2' description='Calculated hours per week for Category 2')
         public Decimal hoursPerWeekCat2;
+    
         @InvocableVariable(label='Hours Per Week - Cat3' description='Calculated hours per week for Category 3')
         public Decimal hoursPerWeekCat3;
+    
         @InvocableVariable(label='Hours Per Week - Post' description='Calculated hours per week for Post Category')
         public Decimal hoursPerWeekPost;
-        @InvocableVariable(label='Schedule Exceptions') public List<pse__Schedule_Exception__c> scheduleExceptions;
-        @InvocableVariable(label='Error Message') public String errorMessage;
-
+    
+        @InvocableVariable(label='Error Message' description='Error encountered during execution')
+        public String errorMessage;
+    
         public ScheduleExceptionOutputWrapper(List<pse__Schedule_Exception__c> exceptions, Decimal cat1Hours, Decimal cat2Hours, Decimal cat3Hours, Decimal postHours, String error) {
             this.scheduleExceptions = exceptions;
             this.hoursPerWeekCat1 = cat1Hours;
@@ -178,7 +183,7 @@ public with sharing class ScheduleHoursDistributor {
             this.hoursPerWeekPost = postHours;
             this.errorMessage = error;
         }
-    }
+    }    
 
     // Invocable Variable Class for Flow Inputs
     public class ScheduleInput {
