@@ -10,6 +10,28 @@ public with sharing class ScheduleHoursDistributor {
 
             ScheduleInput input = inputList[0];
 
+            if (input.scheduleId == null) {
+                return returnErrorWrapper('Error: Schedule ID cannot be null.');
+            }
+            if (input.startDate == null) {
+                return returnErrorWrapper('Error: Start Date cannot be null.');
+            }
+            if (input.endDate == null) {
+                return returnErrorWrapper('Error: End Date cannot be null.');
+            }
+            if (input.numberOfHours == null) {
+                return returnErrorWrapper('Error: Number of Hours cannot be null.');
+            }
+            if (input.numberOfWorkDays == null) {
+                return returnErrorWrapper('Error: Number of Work Days cannot be null.');
+            }
+            if (input.cat1Weeks == null || input.cat2Weeks == null || input.cat3Weeks == null || input.postWeeks == null) {
+                return returnErrorWrapper('Error: Week values cannot be null.');
+            }
+            if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null) {
+                return returnErrorWrapper('Error: Percentage values cannot be null.');
+            }
+
             // Step 1: Ensure all category week values are valid (default to zero)
             input.cat1Weeks = (input.cat1Weeks == null) ? 0 : input.cat1Weeks;
             input.cat2Weeks = (input.cat2Weeks == null) ? 0 : input.cat2Weeks;
@@ -52,6 +74,12 @@ public with sharing class ScheduleHoursDistributor {
             outputList.add(new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 0, 0, 0, 0, e.getMessage()));
         }
         return outputList;
+    }
+
+    private static List<ScheduleExceptionOutputWrapper> returnErrorWrapper(String errorMessage) {
+        return new List<ScheduleExceptionOutputWrapper>{
+            new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 0, 0, 0, 0, errorMessage)
+        };
     }
 
     // Extract holiday dates from existing exceptions
