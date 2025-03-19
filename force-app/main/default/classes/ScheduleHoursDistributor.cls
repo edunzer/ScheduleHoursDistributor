@@ -114,53 +114,33 @@ public with sharing class ScheduleHoursDistributor {
     ) {
         List<pse__Schedule_Exception__c> exceptions = new List<pse__Schedule_Exception__c>();
         Date currentStartDate = input.startDate;
-    
-        // Track assigned weeks for each category
-        Integer allocatedCat1Weeks = 0;
-        Integer allocatedCat2Weeks = 0;
-        Integer allocatedCat3Weeks = 0;
-        Integer allocatedPostWeeks = 0;
-    
-        // Ensure the loop runs until the final end date is covered
+        
         while (currentStartDate <= input.endDate) {
             Date currentEndDate = currentStartDate.addDays(6);
             if (currentEndDate > input.endDate) {
                 currentEndDate = input.endDate;
             }
-    
-            // Check if there are holidays in the week
-            List<Date> holidaysInWeek = new List<Date>();
-            for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
-                if (holidayDates.contains(d)) {
-                    holidaysInWeek.add(d);
-                }
-            }
-    
-            // Assign the correct category based on the allocated weeks
+
+            // Determine category based on current week’s start date
             Decimal hoursPerWeek;
-            String category;
             if (currentStartDate >= input.cat1StartDate && currentStartDate <= input.cat1EndDate) {
-                category = 'Cat1';
                 hoursPerWeek = hoursPerWeekCat1;
             } else if (currentStartDate >= input.cat2StartDate && currentStartDate <= input.cat2EndDate) {
-                category = 'Cat2';
                 hoursPerWeek = hoursPerWeekCat2;
             } else if (currentStartDate >= input.cat3StartDate && currentStartDate <= input.cat3EndDate) {
-                category = 'Cat3';
                 hoursPerWeek = hoursPerWeekCat3;
             } else {
-                category = 'Post';
                 hoursPerWeek = hoursPerWeekPost;
             }
-    
-            // Handle holiday splits
+
+            // Check for holiday splits
             List<Date> holidaysInWeek = new List<Date>();
             for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
                 if (holidayDates.contains(d)) {
                     holidaysInWeek.add(d);
                 }
             }
-    
+
             if (!holidaysInWeek.isEmpty()) {
                 Date segmentStart = currentStartDate;
                 for (Date holiday : holidaysInWeek) {
@@ -173,17 +153,15 @@ public with sharing class ScheduleHoursDistributor {
                     exceptions.add(createScheduleException(input.scheduleId, segmentStart, currentEndDate, input.numberOfWorkDays, hoursPerWeek / input.numberOfWorkDays));
                 }
             } else {
-                // No holidays, create normal record
                 exceptions.add(createScheduleException(input.scheduleId, currentStartDate, currentEndDate, input.numberOfWorkDays, hoursPerWeek / input.numberOfWorkDays));
             }
-    
-            // Move to next week
+
             currentStartDate = currentStartDate.addDays(7);
         }
-    
+
         return exceptions;
     }
-      
+
 
     // Create and return a Schedule Exception record (does not insert)
     private static pse__Schedule_Exception__c createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay) {
