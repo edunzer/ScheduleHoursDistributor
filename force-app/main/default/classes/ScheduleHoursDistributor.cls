@@ -114,7 +114,6 @@ public with sharing class ScheduleHoursDistributor {
     ) {
         List<pse__Schedule_Exception__c> exceptions = new List<pse__Schedule_Exception__c>();
         Date currentStartDate = input.startDate;
-        Integer currentWeek = 0;
     
         // Track assigned weeks for each category
         Integer allocatedCat1Weeks = 0;
@@ -140,25 +139,28 @@ public with sharing class ScheduleHoursDistributor {
             // Assign the correct category based on the allocated weeks
             Decimal hoursPerWeek;
             String category;
-            if (allocatedCat1Weeks < input.cat1Weeks) {
+            if (currentStartDate >= input.cat1StartDate && currentStartDate <= input.cat1EndDate) {
                 category = 'Cat1';
                 hoursPerWeek = hoursPerWeekCat1;
-                allocatedCat1Weeks++;
-            } else if (allocatedCat2Weeks < input.cat2Weeks) {
+            } else if (currentStartDate >= input.cat2StartDate && currentStartDate <= input.cat2EndDate) {
                 category = 'Cat2';
                 hoursPerWeek = hoursPerWeekCat2;
-                allocatedCat2Weeks++;
-            } else if (allocatedCat3Weeks < input.cat3Weeks) {
+            } else if (currentStartDate >= input.cat3StartDate && currentStartDate <= input.cat3EndDate) {
                 category = 'Cat3';
                 hoursPerWeek = hoursPerWeekCat3;
-                allocatedCat3Weeks++;
             } else {
                 category = 'Post';
                 hoursPerWeek = hoursPerWeekPost;
-                allocatedPostWeeks++;
             }
     
-            // Split the schedule week if there are holidays
+            // Handle holiday splits
+            List<Date> holidaysInWeek = new List<Date>();
+            for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
+                if (holidayDates.contains(d)) {
+                    holidaysInWeek.add(d);
+                }
+            }
+    
             if (!holidaysInWeek.isEmpty()) {
                 Date segmentStart = currentStartDate;
                 for (Date holiday : holidaysInWeek) {
@@ -177,11 +179,11 @@ public with sharing class ScheduleHoursDistributor {
     
             // Move to next week
             currentStartDate = currentStartDate.addDays(7);
-            currentWeek++;
         }
     
         return exceptions;
-    }    
+    }
+      
 
     // Create and return a Schedule Exception record (does not insert)
     private static pse__Schedule_Exception__c createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay) {
