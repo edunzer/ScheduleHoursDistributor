@@ -38,6 +38,20 @@ public with sharing class ScheduleHoursDistributor {
             input.cat3Weeks = (input.cat3Weeks == null) ? 0 : input.cat3Weeks;
             input.postWeeks = (input.postWeeks == null) ? 0 : input.postWeeks;
 
+            // Calculate category time ranges
+            input.cat1StartDate = input.startDate;
+            input.cat1EndDate = input.cat1StartDate.addDays(((Integer) input.cat1Weeks * 7) - 1);
+
+            input.cat2StartDate = input.cat1EndDate.addDays(1);
+            input.cat2EndDate = input.cat2StartDate.addDays(((Integer) input.cat2Weeks * 7) - 1);
+
+            input.cat3StartDate = input.cat2EndDate.addDays(1);
+            input.cat3EndDate = input.cat3StartDate.addDays(((Integer) input.cat3Weeks * 7) - 1);
+
+            input.postStartDate = input.cat3EndDate.addDays(1);
+            Date calculatedPostEnd = input.postStartDate.addDays(((Integer) input.postWeeks * 7) - 1);
+            input.postEndDate = (calculatedPostEnd > input.endDate) ? input.endDate : calculatedPostEnd;
+
             input.cat1Percentage = (input.cat1Percentage == null) ? 0 : input.cat1Percentage;
             input.cat2Percentage = (input.cat2Percentage == null) ? 0 : input.cat2Percentage;
             input.cat3Percentage = (input.cat3Percentage == null) ? 0 : input.cat3Percentage;
@@ -234,5 +248,14 @@ public with sharing class ScheduleHoursDistributor {
 
         @InvocableVariable(label='Existing Schedule Exceptions') 
         public List<pse__Schedule_Exception__c> existingExceptions;
+
+        public Date cat1StartDate;
+        public Date cat1EndDate;
+        public Date cat2StartDate;
+        public Date cat2EndDate;
+        public Date cat3StartDate;
+        public Date cat3EndDate;
+        public Date postStartDate;
+        public Date postEndDate;
     }
 }
