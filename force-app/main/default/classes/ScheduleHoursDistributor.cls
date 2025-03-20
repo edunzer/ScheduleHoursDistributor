@@ -38,6 +38,20 @@ public with sharing class ScheduleHoursDistributor {
             input.cat3Weeks = (input.cat3Weeks == null) ? 0 : input.cat3Weeks;
             input.postWeeks = (input.postWeeks == null) ? 0 : input.postWeeks;
 
+            // Calculate category time ranges
+            input.cat1StartDate = input.startDate;
+            input.cat1EndDate = input.cat1StartDate.addDays(((Integer) input.cat1Weeks * 7) - 1);
+
+            input.cat2StartDate = input.cat1EndDate.addDays(1);
+            input.cat2EndDate = input.cat2StartDate.addDays(((Integer) input.cat2Weeks * 7) - 1);
+
+            input.cat3StartDate = input.cat2EndDate.addDays(1);
+            input.cat3EndDate = input.cat3StartDate.addDays(((Integer) input.cat3Weeks * 7) - 1);
+
+            input.postStartDate = input.cat3EndDate.addDays(1);
+            Date calculatedPostEnd = input.postStartDate.addDays(((Integer) input.postWeeks * 7) - 1);
+            input.postEndDate = (calculatedPostEnd > input.endDate) ? input.endDate : calculatedPostEnd;
+
             input.cat1Percentage = (input.cat1Percentage == null) ? 0 : input.cat1Percentage;
             input.cat2Percentage = (input.cat2Percentage == null) ? 0 : input.cat2Percentage;
             input.cat3Percentage = (input.cat3Percentage == null) ? 0 : input.cat3Percentage;
@@ -100,51 +114,36 @@ public with sharing class ScheduleHoursDistributor {
     ) {
         List<pse__Schedule_Exception__c> exceptions = new List<pse__Schedule_Exception__c>();
         Date currentStartDate = input.startDate;
-        Integer currentWeek = 0;
-    
-        // Track assigned weeks for each category
-        Integer allocatedCat1Weeks = 0;
-        Integer allocatedCat2Weeks = 0;
-        Integer allocatedCat3Weeks = 0;
-        Integer allocatedPostWeeks = 0;
-    
-        // Ensure the loop runs until the final end date is covered
+        
         while (currentStartDate <= input.endDate) {
             Date currentEndDate = currentStartDate.addDays(6);
             if (currentEndDate > input.endDate) {
                 currentEndDate = input.endDate;
             }
-    
-            // Check if there are holidays in the week
+
+            // Determine category based on current week’s start date
+            Decimal hoursPerWeek;
+            if (input.cat1Weeks > 0 && currentStartDate >= input.cat1StartDate && currentStartDate <= input.cat1EndDate) {
+                hoursPerWeek = hoursPerWeekCat1;
+            } else if (input.cat2Weeks > 0 && currentStartDate >= input.cat2StartDate && currentStartDate <= input.cat2EndDate) {
+                hoursPerWeek = hoursPerWeekCat2;
+            } else if (input.cat3Weeks > 0 && currentStartDate >= input.cat3StartDate && currentStartDate <= input.cat3EndDate) {
+                hoursPerWeek = hoursPerWeekCat3;
+            } else if (input.postWeeks > 0 && currentStartDate >= input.postStartDate && currentStartDate <= input.postEndDate) {
+                hoursPerWeek = hoursPerWeekPost;
+            } else {
+                // If no matching category found (shouldn't happen), default to 0
+                hoursPerWeek = 0;
+            }            
+
+            // Check for holiday splits
             List<Date> holidaysInWeek = new List<Date>();
             for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
                 if (holidayDates.contains(d)) {
                     holidaysInWeek.add(d);
                 }
             }
-    
-            // Assign the correct category based on the allocated weeks
-            Decimal hoursPerWeek;
-            String category;
-            if (allocatedCat1Weeks < input.cat1Weeks) {
-                category = 'Cat1';
-                hoursPerWeek = hoursPerWeekCat1;
-                allocatedCat1Weeks++;
-            } else if (allocatedCat2Weeks < input.cat2Weeks) {
-                category = 'Cat2';
-                hoursPerWeek = hoursPerWeekCat2;
-                allocatedCat2Weeks++;
-            } else if (allocatedCat3Weeks < input.cat3Weeks) {
-                category = 'Cat3';
-                hoursPerWeek = hoursPerWeekCat3;
-                allocatedCat3Weeks++;
-            } else {
-                category = 'Post';
-                hoursPerWeek = hoursPerWeekPost;
-                allocatedPostWeeks++;
-            }
-    
-            // Split the schedule week if there are holidays
+
             if (!holidaysInWeek.isEmpty()) {
                 Date segmentStart = currentStartDate;
                 for (Date holiday : holidaysInWeek) {
@@ -157,17 +156,15 @@ public with sharing class ScheduleHoursDistributor {
                     exceptions.add(createScheduleException(input.scheduleId, segmentStart, currentEndDate, input.numberOfWorkDays, hoursPerWeek / input.numberOfWorkDays));
                 }
             } else {
-                // No holidays, create normal record
                 exceptions.add(createScheduleException(input.scheduleId, currentStartDate, currentEndDate, input.numberOfWorkDays, hoursPerWeek / input.numberOfWorkDays));
             }
-    
-            // Move to next week
+
             currentStartDate = currentStartDate.addDays(7);
-            currentWeek++;
         }
-    
+
         return exceptions;
-    }    
+    }
+
 
     // Create and return a Schedule Exception record (does not insert)
     private static pse__Schedule_Exception__c createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay) {
@@ -234,5 +231,14 @@ public with sharing class ScheduleHoursDistributor {
 
         @InvocableVariable(label='Existing Schedule Exceptions') 
         public List<pse__Schedule_Exception__c> existingExceptions;
+
+        public Date cat1StartDate;
+        public Date cat1EndDate;
+        public Date cat2StartDate;
+        public Date cat2EndDate;
+        public Date cat3StartDate;
+        public Date cat3EndDate;
+        public Date postStartDate;
+        public Date postEndDate;
     }
 }
