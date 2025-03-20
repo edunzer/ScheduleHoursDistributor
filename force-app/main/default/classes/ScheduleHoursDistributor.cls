@@ -152,13 +152,14 @@ public with sharing class ScheduleHoursDistributor {
     ) {
         List<pse__Schedule_Exception__c> exceptions = new List<pse__Schedule_Exception__c>();
         Date currentStartDate = input.startDate;
+        Integer workDays = input.numberOfWorkDays; // Fixed value that will always be used for record creation
         
         while (currentStartDate <= input.endDate) {
             Date currentEndDate = currentStartDate.addDays(6);
             if (currentEndDate > input.endDate) {
                 currentEndDate = input.endDate;
             }
-    
+
             // Determine category based on current week’s start date
             Decimal hoursPerWeek;
             if (input.cat1Weeks > 0 && currentStartDate >= input.cat1StartDate && currentStartDate <= input.cat1EndDate) {
@@ -172,7 +173,7 @@ public with sharing class ScheduleHoursDistributor {
             } else {
                 hoursPerWeek = 0;
             }
-    
+
             // Identify holidays in this week
             List<Date> holidaysInWeek = new List<Date>();
             for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
@@ -180,17 +181,17 @@ public with sharing class ScheduleHoursDistributor {
                     holidaysInWeek.add(d);
                 }
             }
-    
-            Integer workDaysInWeek = input.numberOfWorkDays - holidaysInWeek.size();
+
+            Integer workDaysInWeek = workDays - holidaysInWeek.size();
             Decimal hoursPerDay = (workDaysInWeek > 0) ? (hoursPerWeek / workDaysInWeek) : 0;
-    
+
             if (!holidaysInWeek.isEmpty()) {
                 Date segmentStart = currentStartDate;
                 for (Date holiday : holidaysInWeek) {
                     if (segmentStart < holiday) {
                         exceptions.add(createScheduleException(
                             input.scheduleId, segmentStart, holiday.addDays(-1),
-                            workDaysBetween(segmentStart, holiday.addDays(-1), holidayDates), hoursPerDay
+                            workDays, hoursPerDay
                         ));
                     }
                     segmentStart = holiday.addDays(1);
@@ -198,22 +199,22 @@ public with sharing class ScheduleHoursDistributor {
                 if (segmentStart <= currentEndDate) {
                     exceptions.add(createScheduleException(
                         input.scheduleId, segmentStart, currentEndDate,
-                        workDaysBetween(segmentStart, currentEndDate, holidayDates), hoursPerDay
+                        workDays, hoursPerDay
                     ));
                 }
             } else {
                 exceptions.add(createScheduleException(
                     input.scheduleId, currentStartDate, currentEndDate,
-                    workDaysInWeek, hoursPerDay
+                    workDays, hoursPerDay
                 ));
             }
-    
+
             currentStartDate = currentStartDate.addDays(7);
         }
-    
-        return exceptions;
-    }    
 
+        return exceptions;
+    }
+ 
     // Create and return a Schedule Exception record (does not insert)
     private static pse__Schedule_Exception__c createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay) {
         return new pse__Schedule_Exception__c(
