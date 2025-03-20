@@ -123,15 +123,18 @@ public with sharing class ScheduleHoursDistributor {
 
             // Determine category based on current week’s start date
             Decimal hoursPerWeek;
-            if (currentStartDate >= input.cat1StartDate && currentStartDate <= input.cat1EndDate) {
+            if (input.cat1Weeks > 0 && currentStartDate >= input.cat1StartDate && currentStartDate <= input.cat1EndDate) {
                 hoursPerWeek = hoursPerWeekCat1;
-            } else if (currentStartDate >= input.cat2StartDate && currentStartDate <= input.cat2EndDate) {
+            } else if (input.cat2Weeks > 0 && currentStartDate >= input.cat2StartDate && currentStartDate <= input.cat2EndDate) {
                 hoursPerWeek = hoursPerWeekCat2;
-            } else if (currentStartDate >= input.cat3StartDate && currentStartDate <= input.cat3EndDate) {
+            } else if (input.cat3Weeks > 0 && currentStartDate >= input.cat3StartDate && currentStartDate <= input.cat3EndDate) {
                 hoursPerWeek = hoursPerWeekCat3;
-            } else {
+            } else if (input.postWeeks > 0 && currentStartDate >= input.postStartDate && currentStartDate <= input.postEndDate) {
                 hoursPerWeek = hoursPerWeekPost;
-            }
+            } else {
+                // If no matching category found (shouldn't happen), default to 0
+                hoursPerWeek = 0;
+            }            
 
             // Check for holiday splits
             List<Date> holidaysInWeek = new List<Date>();
