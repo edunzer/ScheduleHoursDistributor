@@ -87,9 +87,8 @@ public with sharing class ScheduleHoursDistributor {
             Decimal hoursPerWeekCat3 = (input.cat3Weeks > 0) ? ((input.cat3Percentage/100) * input.numberOfHours) / input.cat3Weeks : 0;
             Decimal hoursPerWeekPost = (input.postWeeks > 0) ? ((input.postPercentage/100) * input.numberOfHours) / input.postWeeks : 0;
 
-            List<pse__Schedule_Exception__c> exceptions = generateExceptions(
-                input, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost, holidayDates
-            );
+            // Generate exceptions week by week
+            List<pse__Schedule_Exception__c> exceptions = generateExceptions(input, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost, holidayDates);
 
             // Package output
             outputList.add(new ScheduleExceptionOutputWrapper(exceptions, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost, null));
@@ -141,18 +140,16 @@ public with sharing class ScheduleHoursDistributor {
 
     // Main calculation method: generates schedule exception records for each week
     private static List<pse__Schedule_Exception__c> generateExceptions(
-        ScheduleInput input, Decimal hoursPerWeekCat1, Decimal hoursPerWeekCat2, 
+        ScheduleInput input, Decimal hoursPerWeekCat1, Decimal hoursPerWeekCat2,
         Decimal hoursPerWeekCat3, Decimal hoursPerWeekPost, Set<Date> holidayDates
     ) {
         List<pse__Schedule_Exception__c> exceptions = new List<pse__Schedule_Exception__c>();
         Date currentStartDate = input.startDate;
-        Integer workDays = input.numberOfWorkDays; 
-        
+        Integer workDays = input.numberOfWorkDays;
+
         while (currentStartDate <= input.endDate) {
             Date currentEndDate = currentStartDate.addDays(6);
-            if (currentEndDate > input.endDate) {
-                currentEndDate = input.endDate;
-            }
+            if (currentEndDate > input.endDate) currentEndDate = input.endDate;
 
             // Determine hours for this category week
             Decimal hoursPerWeek;
@@ -184,24 +181,15 @@ public with sharing class ScheduleHoursDistributor {
                 Date segmentStart = currentStartDate;
                 for (Date holiday : holidaysInWeek) {
                     if (segmentStart < holiday) {
-                        exceptions.add(createScheduleException(
-                            input.scheduleId, segmentStart, holiday.addDays(-1),
-                            workDays, hoursPerDay
-                        ));
+                        exceptions.add(createScheduleException(input.scheduleId, segmentStart, holiday.addDays(-1), workDays, hoursPerDay));
                     }
                     segmentStart = holiday.addDays(1);
                 }
                 if (segmentStart <= currentEndDate) {
-                    exceptions.add(createScheduleException(
-                        input.scheduleId, segmentStart, currentEndDate,
-                        workDays, hoursPerDay
-                    ));
+                    exceptions.add(createScheduleException(input.scheduleId, segmentStart, currentEndDate, workDays, hoursPerDay));
                 }
             } else {
-                exceptions.add(createScheduleException(
-                    input.scheduleId, currentStartDate, currentEndDate,
-                    workDays, hoursPerDay
-                ));
+                exceptions.add(createScheduleException(input.scheduleId, currentStartDate, currentEndDate, workDays, hoursPerDay));
             }
 
             currentStartDate = currentStartDate.addDays(7);
