@@ -32,13 +32,11 @@ public with sharing class ScheduleHoursDistributor {
                 return returnErrorWrapper('Error: Percentage values cannot be null.');
             }
 
-            // Step 1: Ensure all category week values are valid (default to zero)
             input.cat1Weeks = (input.cat1Weeks == null) ? 0 : input.cat1Weeks;
             input.cat2Weeks = (input.cat2Weeks == null) ? 0 : input.cat2Weeks;
             input.cat3Weeks = (input.cat3Weeks == null) ? 0 : input.cat3Weeks;
             input.postWeeks = (input.postWeeks == null) ? 0 : input.postWeeks;
 
-            // Calculate category time ranges
             input.cat1StartDate = input.startDate;
             input.cat1EndDate = input.cat1StartDate.addDays(((Integer) input.cat1Weeks * 7) - 1);
 
@@ -60,24 +58,19 @@ public with sharing class ScheduleHoursDistributor {
             input.numberOfWorkDays = (input.numberOfWorkDays == null) ? 0 : input.numberOfWorkDays;
             input.numberOfHours = (input.numberOfHours == null) ? 0 : input.numberOfHours;
 
-            // Step 2: Calculate total number of weeks
             Decimal totalWeeks = input.cat1Weeks + input.cat2Weeks + input.cat3Weeks + input.postWeeks;
 
-            // Avoid processing if all weeks are zero or if no hours are assigned
             if (totalWeeks == 0 || input.numberOfHours == 0) {
                 return new List<ScheduleExceptionOutputWrapper>();
             }
 
-            // Step 3: Extract holiday dates from existing schedule exceptions (now included in input)
             Set<Date> holidayDates = extractHolidayDates(input.existingExceptions);
 
-            // Count holidays per category
             Integer cat1Holidays = countHolidaysInRange(holidayDates, input.cat1StartDate, input.cat1EndDate);
             Integer cat2Holidays = countHolidaysInRange(holidayDates, input.cat2StartDate, input.cat2EndDate);
             Integer cat3Holidays = countHolidaysInRange(holidayDates, input.cat3StartDate, input.cat3EndDate);
             Integer postHolidays = countHolidaysInRange(holidayDates, input.postStartDate, input.postEndDate);
 
-            // Reduce category weeks if holidays equal or exceed a full work week
             Integer cat1HolidayWeeks = cat1Holidays / input.numberOfWorkDays;
             Integer cat2HolidayWeeks = cat2Holidays / input.numberOfWorkDays;
             Integer cat3HolidayWeeks = cat3Holidays / input.numberOfWorkDays;
@@ -88,19 +81,15 @@ public with sharing class ScheduleHoursDistributor {
             input.cat3Weeks = input.cat3Weeks - cat3HolidayWeeks;
             input.postWeeks = input.postWeeks - postHolidayWeeks;
 
-
-            // Step 4: Calculate hours per week for each category, ensuring no division by zero
             Decimal hoursPerWeekCat1 = (input.cat1Weeks > 0) ? ((input.cat1Percentage/100) * input.numberOfHours) / input.cat1Weeks : 0;
             Decimal hoursPerWeekCat2 = (input.cat2Weeks > 0) ? ((input.cat2Percentage/100) * input.numberOfHours) / input.cat2Weeks : 0;
             Decimal hoursPerWeekCat3 = (input.cat3Weeks > 0) ? ((input.cat3Percentage/100) * input.numberOfHours) / input.cat3Weeks : 0;
             Decimal hoursPerWeekPost = (input.postWeeks > 0) ? ((input.postPercentage/100) * input.numberOfHours) / input.postWeeks : 0;
 
-            // Step 5: Generate schedule exception records with holiday handling
             List<pse__Schedule_Exception__c> exceptions = generateExceptions(
                 input, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost, holidayDates
             );
 
-            // Step 6: Wrap and return with calculated hours per category
             outputList.add(new ScheduleExceptionOutputWrapper(exceptions, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost, null));
         } catch (Exception e) {
             outputList.add(new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 0, 0, 0, 0, e.getMessage()));
@@ -114,7 +103,6 @@ public with sharing class ScheduleHoursDistributor {
         };
     }
 
-    // Extract holiday dates from existing exceptions
     private static Set<Date> extractHolidayDates(List<pse__Schedule_Exception__c> existingExceptions) {
         Set<Date> holidayDates = new Set<Date>();
         if (existingExceptions != null) {
@@ -145,14 +133,13 @@ public with sharing class ScheduleHoursDistributor {
         return count;
     }    
 
-    // Generate schedule exceptions dynamically with holiday handling
     private static List<pse__Schedule_Exception__c> generateExceptions(
         ScheduleInput input, Decimal hoursPerWeekCat1, Decimal hoursPerWeekCat2, 
         Decimal hoursPerWeekCat3, Decimal hoursPerWeekPost, Set<Date> holidayDates
     ) {
         List<pse__Schedule_Exception__c> exceptions = new List<pse__Schedule_Exception__c>();
         Date currentStartDate = input.startDate;
-        Integer workDays = input.numberOfWorkDays; // Fixed value that will always be used for record creation
+        Integer workDays = input.numberOfWorkDays; 
         
         while (currentStartDate <= input.endDate) {
             Date currentEndDate = currentStartDate.addDays(6);
@@ -160,7 +147,6 @@ public with sharing class ScheduleHoursDistributor {
                 currentEndDate = input.endDate;
             }
 
-            // Determine category based on current week’s start date
             Decimal hoursPerWeek;
             if (input.cat1Weeks > 0 && currentStartDate >= input.cat1StartDate && currentStartDate <= input.cat1EndDate) {
                 hoursPerWeek = hoursPerWeekCat1;
@@ -174,7 +160,6 @@ public with sharing class ScheduleHoursDistributor {
                 hoursPerWeek = 0;
             }
 
-            // Identify holidays in this week
             List<Date> holidaysInWeek = new List<Date>();
             for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
                 if (holidayDates.contains(d)) {
@@ -215,7 +200,6 @@ public with sharing class ScheduleHoursDistributor {
         return exceptions;
     }
  
-    // Create and return a Schedule Exception record (does not insert)
     private static pse__Schedule_Exception__c createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay) {
         return new pse__Schedule_Exception__c(
             pse__Schedule__c = scheduleId,
@@ -260,7 +244,6 @@ public with sharing class ScheduleHoursDistributor {
         }
     }    
 
-    // Invocable Variable Class for Flow Inputs
     public class ScheduleInput {
         @InvocableVariable(label='Schedule ID') public Id scheduleId;
         @InvocableVariable(label='Start Date') public Date startDate;
