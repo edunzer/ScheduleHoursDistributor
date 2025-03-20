@@ -127,17 +127,6 @@ public with sharing class ScheduleHoursDistributor {
         return count;
     }
 
-    // Helper method: calculates working days between two dates excluding holidays
-    private static Integer workDaysBetween(Date startDate, Date endDate, Set<Date> holidayDates) {
-        Integer count = 0;
-        for (Date d = startDate; d <= endDate; d = d.addDays(1)) {
-            if (!holidayDates.contains(d)) {
-                count++;
-            }
-        }
-        return count;
-    }
-
     // Main calculation method: generates schedule exception records for each week
     private static List<pse__Schedule_Exception__c> generateExceptions(
         ScheduleInput input, Decimal hoursPerWeekCat1, Decimal hoursPerWeekCat2,
