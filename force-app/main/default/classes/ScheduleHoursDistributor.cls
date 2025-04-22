@@ -1,7 +1,7 @@
 public with sharing class ScheduleHoursDistributor {
 
     // Main method: Generates schedule exception records based on input parameters without inserting them
-    @InvocableMethod(label='Generate Schedule Exceptions' description='Calculates and returns Schedule Exception records without inserting them.')
+    @InvocableMethod(label='Generate Hours Distrobution Schedule Exceptions' description='Calculates and returns Schedule Exception records without inserting them.')
     public static List<ScheduleExceptionOutputWrapper> generateScheduleExceptions(List<ScheduleInput> inputList) {
         List<ScheduleExceptionOutputWrapper> outputList = new List<ScheduleExceptionOutputWrapper>();
         try {
