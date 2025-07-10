@@ -33,6 +33,10 @@ public with sharing class ScheduleHoursDistributor {
             if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null) {
                 return returnErrorWrapper('Error: Percentage values cannot be null.');
             }
+            // Onsite dates validation
+            if ((input.onsiteStartDate != null && input.onsiteEndDate == null) || (input.onsiteStartDate == null && input.onsiteEndDate != null)) {
+                return returnErrorWrapper('Error: Both Onsite Start Date and Onsite End Date must be provided.');
+            }
 
             input.cat1Weeks = (input.cat1Weeks == null) ? 0 : input.cat1Weeks;
             input.cat2Weeks = (input.cat2Weeks == null) ? 0 : input.cat2Weeks;
@@ -46,7 +50,12 @@ public with sharing class ScheduleHoursDistributor {
             input.cat2EndDate = input.cat2StartDate.addDays(((Integer) input.cat2Weeks * 7) - 1);
             input.cat3StartDate = input.cat2EndDate.addDays(1);
             input.cat3EndDate = input.cat3StartDate.addDays(((Integer) input.cat3Weeks * 7) - 1);
-            input.postStartDate = input.cat3EndDate.addDays(1);
+            // Onsite gap logic
+            if (input.onsiteStartDate != null && input.onsiteEndDate != null) {
+                input.postStartDate = input.onsiteEndDate.addDays(1);
+            } else {
+                input.postStartDate = input.cat3EndDate.addDays(1);
+            }
             Date calculatedPostEnd = input.postStartDate.addDays(((Integer) input.postWeeks * 7) - 1);
             input.postEndDate = (calculatedPostEnd > input.endDate) ? input.endDate : calculatedPostEnd;
 
@@ -139,6 +148,21 @@ public with sharing class ScheduleHoursDistributor {
         while (currentStartDate <= input.endDate) {
             Date currentEndDate = currentStartDate.addDays(6);
             if (currentEndDate > input.endDate) currentEndDate = input.endDate;
+
+            // If onsite gap is defined and this week overlaps with it, create 0-hour exception for the overlap
+            if (input.onsiteStartDate != null && input.onsiteEndDate != null &&
+                currentStartDate <= input.onsiteEndDate && currentEndDate >= input.onsiteStartDate) {
+                Date onsiteStart = (currentStartDate < input.onsiteStartDate) ? input.onsiteStartDate : currentStartDate;
+                Date onsiteEnd = (currentEndDate > input.onsiteEndDate) ? input.onsiteEndDate : currentEndDate;
+                exceptions.add(createScheduleException(input.scheduleId, onsiteStart, onsiteEnd, workDays, 0));
+                // Move to the week after onsiteEndDate if currentStartDate is within the onsite gap
+                if (currentStartDate >= input.onsiteStartDate && currentStartDate <= input.onsiteEndDate) {
+                    currentStartDate = input.onsiteEndDate.addDays(1);
+                } else {
+                    currentStartDate = currentStartDate.addDays(7);
+                }
+                continue;
+            }
 
             // Determine hours for this category week
             Decimal hoursPerWeek;
@@ -235,6 +259,8 @@ public with sharing class ScheduleHoursDistributor {
 
     // Input wrapper class: Holds parameters from Flow for schedule generation
     public class ScheduleInput {
+        @InvocableVariable(label='Onsite Start Date') public Date onsiteStartDate;
+        @InvocableVariable(label='Onsite End Date') public Date onsiteEndDate;
         @InvocableVariable(label='Schedule ID') public Id scheduleId;
         @InvocableVariable(label='Start Date') public Date startDate;
         @InvocableVariable(label='End Date') public Date endDate;
