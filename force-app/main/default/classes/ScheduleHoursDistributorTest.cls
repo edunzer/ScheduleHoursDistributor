@@ -38,6 +38,9 @@ public class ScheduleHoursDistributorTest {
         input.cat2Percentage = 30;
         input.cat3Percentage = 40;
         input.postPercentage = 5;
+        // Add onsite dates for all tests
+        input.onsiteStartDate = Date.newInstance(2025, 3, 1);
+        input.onsiteEndDate = Date.newInstance(2025, 3, 14);
         input.existingExceptions = new List<pse__Schedule_Exception__c>();
 
         List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
@@ -66,6 +69,9 @@ public class ScheduleHoursDistributorTest {
         input.cat2Percentage = 30;
         input.cat3Percentage = 40;
         input.postPercentage = 5;
+        // Add onsite dates for all tests
+        input.onsiteStartDate = Date.newInstance(2025, 3, 1);
+        input.onsiteEndDate = Date.newInstance(2025, 3, 14);
         input.existingExceptions = new List<pse__Schedule_Exception__c>();
 
         List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
