@@ -33,6 +33,10 @@ public with sharing class ScheduleHoursDistributor {
             if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null) {
                 return returnErrorWrapper('Error: Percentage values cannot be null.');
             }
+            // Onsite dates validation
+            if ((input.onsiteStartDate != null && input.onsiteEndDate == null) || (input.onsiteStartDate == null && input.onsiteEndDate != null)) {
+                return returnErrorWrapper('Error: Both Onsite Start Date and Onsite End Date must be provided.');
+            }
 
             input.cat1Weeks = (input.cat1Weeks == null) ? 0 : input.cat1Weeks;
             input.cat2Weeks = (input.cat2Weeks == null) ? 0 : input.cat2Weeks;
@@ -46,7 +50,12 @@ public with sharing class ScheduleHoursDistributor {
             input.cat2EndDate = input.cat2StartDate.addDays(((Integer) input.cat2Weeks * 7) - 1);
             input.cat3StartDate = input.cat2EndDate.addDays(1);
             input.cat3EndDate = input.cat3StartDate.addDays(((Integer) input.cat3Weeks * 7) - 1);
-            input.postStartDate = input.cat3EndDate.addDays(1);
+            // Onsite gap logic
+            if (input.onsiteStartDate != null && input.onsiteEndDate != null) {
+                input.postStartDate = input.onsiteEndDate.addDays(1);
+            } else {
+                input.postStartDate = input.cat3EndDate.addDays(1);
+            }
             Date calculatedPostEnd = input.postStartDate.addDays(((Integer) input.postWeeks * 7) - 1);
             input.postEndDate = (calculatedPostEnd > input.endDate) ? input.endDate : calculatedPostEnd;
 
@@ -136,50 +145,30 @@ public with sharing class ScheduleHoursDistributor {
         Date currentStartDate = input.startDate;
         Integer workDays = input.numberOfWorkDays;
 
+
         while (currentStartDate <= input.endDate) {
             Date currentEndDate = currentStartDate.addDays(6);
             if (currentEndDate > input.endDate) currentEndDate = input.endDate;
 
-            // Determine hours for this category week
-            Decimal hoursPerWeek;
-            if (input.cat1Weeks > 0 && currentStartDate >= input.cat1StartDate && currentStartDate <= input.cat1EndDate) {
-                hoursPerWeek = hoursPerWeekCat1;
-            } else if (input.cat2Weeks > 0 && currentStartDate >= input.cat2StartDate && currentStartDate <= input.cat2EndDate) {
-                hoursPerWeek = hoursPerWeekCat2;
-            } else if (input.cat3Weeks > 0 && currentStartDate >= input.cat3StartDate && currentStartDate <= input.cat3EndDate) {
-                hoursPerWeek = hoursPerWeekCat3;
-            } else if (input.postWeeks > 0 && currentStartDate >= input.postStartDate && currentStartDate <= input.postEndDate) {
-                hoursPerWeek = hoursPerWeekPost;
-            } else {
-                hoursPerWeek = 0;
-            }
-
-            // Calculate hours per day after accounting for weekly holidays
-            List<Date> holidaysInWeek = new List<Date>();
+            // Split the week into segments by category and onsite
+            Date segmentStart = currentStartDate;
+            Decimal currentHours = null;
+            Boolean currentIsOnsite = null;
             for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
-                if (holidayDates.contains(d)) {
-                    holidaysInWeek.add(d);
+                Boolean isOnsite = (input.onsiteStartDate != null && input.onsiteEndDate != null && d >= input.onsiteStartDate && d <= input.onsiteEndDate);
+                Decimal hoursForDay = isOnsite ? 0 : getHoursPerWeekForDate(d, input, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost);
+                if (currentHours == null) {
+                    currentHours = hoursForDay;
+                    currentIsOnsite = isOnsite;
+                    segmentStart = d;
+                } else if (hoursForDay != currentHours || isOnsite != currentIsOnsite) {
+                    addSegmentException(exceptions, input, segmentStart, d.addDays(-1), workDays, currentHours, holidayDates);
+                    currentHours = hoursForDay;
+                    currentIsOnsite = isOnsite;
+                    segmentStart = d;
                 }
             }
-
-            Integer workDaysInWeek = workDays - holidaysInWeek.size();
-            Decimal hoursPerDay = (workDaysInWeek > 0) ? (hoursPerWeek / workDaysInWeek) : 0;
-
-            // Create exceptions for each partial segment split by holidays
-            if (!holidaysInWeek.isEmpty()) {
-                Date segmentStart = currentStartDate;
-                for (Date holiday : holidaysInWeek) {
-                    if (segmentStart < holiday) {
-                        exceptions.add(createScheduleException(input.scheduleId, segmentStart, holiday.addDays(-1), workDays, hoursPerDay));
-                    }
-                    segmentStart = holiday.addDays(1);
-                }
-                if (segmentStart <= currentEndDate) {
-                    exceptions.add(createScheduleException(input.scheduleId, segmentStart, currentEndDate, workDays, hoursPerDay));
-                }
-            } else {
-                exceptions.add(createScheduleException(input.scheduleId, currentStartDate, currentEndDate, workDays, hoursPerDay));
-            }
+            addSegmentException(exceptions, input, segmentStart, currentEndDate, workDays, currentHours, holidayDates);
 
             currentStartDate = currentStartDate.addDays(7);
         }
@@ -201,6 +190,49 @@ public with sharing class ScheduleHoursDistributor {
             pse__Saturday_Hours__c = (workDays >= 6) ? hoursPerDay : 0,
             pse__Sunday_Hours__c = (workDays >= 7) ? hoursPerDay : 0
         );
+    }
+
+    // Helper method to determine hours per week for a given date
+    private static Decimal getHoursPerWeekForDate(Date d, ScheduleInput input, Decimal hoursPerWeekCat1, Decimal hoursPerWeekCat2, Decimal hoursPerWeekCat3, Decimal hoursPerWeekPost) {
+        if (input.cat1Weeks > 0 && d >= input.cat1StartDate && d <= input.cat1EndDate) {
+            return hoursPerWeekCat1;
+        } else if (input.cat2Weeks > 0 && d >= input.cat2StartDate && d <= input.cat2EndDate) {
+            return hoursPerWeekCat2;
+        } else if (input.cat3Weeks > 0 && d >= input.cat3StartDate && d <= input.cat3EndDate) {
+            return hoursPerWeekCat3;
+        } else if (input.postWeeks > 0 && d >= input.postStartDate && d <= input.postEndDate) {
+            return hoursPerWeekPost;
+        } else {
+            return 0;
+        }
+    }
+
+    // Helper to add a segment exception, splitting by holidays
+    private static void addSegmentException(List<pse__Schedule_Exception__c> exceptions, ScheduleInput input, Date segStart, Date segEnd, Integer workDays, Decimal hoursPerWeek, Set<Date> holidayDates) {
+        if (segStart > segEnd) return;
+        // Calculate holidays in this segment
+        List<Date> holidaysInSegment = new List<Date>();
+        for (Date d = segStart; d <= segEnd; d = d.addDays(1)) {
+            if (holidayDates.contains(d)) {
+                holidaysInSegment.add(d);
+            }
+        }
+        Integer workDaysInSegment = workDays - holidaysInSegment.size();
+        Decimal hoursPerDay = (workDaysInSegment > 0) ? (hoursPerWeek / workDaysInSegment) : 0;
+        if (!holidaysInSegment.isEmpty()) {
+            Date segmentStart = segStart;
+            for (Date holiday : holidaysInSegment) {
+                if (segmentStart < holiday) {
+                    exceptions.add(createScheduleException(input.scheduleId, segmentStart, holiday.addDays(-1), workDays, hoursPerDay));
+                }
+                segmentStart = holiday.addDays(1);
+            }
+            if (segmentStart <= segEnd) {
+                exceptions.add(createScheduleException(input.scheduleId, segmentStart, segEnd, workDays, hoursPerDay));
+            }
+        } else {
+            exceptions.add(createScheduleException(input.scheduleId, segStart, segEnd, workDays, hoursPerDay));
+        }
     }
 
     // Wrapper class: Holds output schedule exceptions and calculated values
@@ -235,6 +267,8 @@ public with sharing class ScheduleHoursDistributor {
 
     // Input wrapper class: Holds parameters from Flow for schedule generation
     public class ScheduleInput {
+        @InvocableVariable(label='Onsite Start Date') public Date onsiteStartDate;
+        @InvocableVariable(label='Onsite End Date') public Date onsiteEndDate;
         @InvocableVariable(label='Schedule ID') public Id scheduleId;
         @InvocableVariable(label='Start Date') public Date startDate;
         @InvocableVariable(label='End Date') public Date endDate;
