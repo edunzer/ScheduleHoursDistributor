@@ -43,6 +43,21 @@ public with sharing class ScheduleHoursDistributor {
             input.cat3Weeks = (input.cat3Weeks == null) ? 0 : input.cat3Weeks;
             input.postWeeks = (input.postWeeks == null) ? 0 : input.postWeeks;
 
+
+            // --- New Onsite Gap Logic ---
+            // If onsiteStartDate is provided, zero out the entire week containing it (Monday-Sunday)
+            Set<Date> onsiteGapDates = new Set<Date>();
+            if (input.onsiteStartDate != null) {
+                // Find Monday of the week containing onsiteStartDate (Apex: 1=Sunday, 2=Monday, ..., 7=Saturday)
+                Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
+                Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek; // If Sunday, go back 6 days; else, go back to Monday
+                Date weekStart = input.onsiteStartDate.addDays(daysToMonday);
+                Date weekEnd = weekStart.addDays(6); // Sunday
+                for (Date d = weekStart; d <= weekEnd; d = d.addDays(1)) {
+                    onsiteGapDates.add(d);
+                }
+            }
+
             // Calculate category date ranges
             input.cat1StartDate = input.startDate;
             input.cat1EndDate = input.cat1StartDate.addDays(((Integer) input.cat1Weeks * 7) - 1);
@@ -50,9 +65,16 @@ public with sharing class ScheduleHoursDistributor {
             input.cat2EndDate = input.cat2StartDate.addDays(((Integer) input.cat2Weeks * 7) - 1);
             input.cat3StartDate = input.cat2EndDate.addDays(1);
             input.cat3EndDate = input.cat3StartDate.addDays(((Integer) input.cat3Weeks * 7) - 1);
-            // Onsite gap logic
-            if (input.onsiteStartDate != null && input.onsiteEndDate != null) {
-                input.postStartDate = input.onsiteEndDate.addDays(1);
+
+            // No need to remove onsite gap days from Category 3 here; handled in exception generation
+
+            // Set postStartDate to the day after the onsite gap week if onsiteStartDate is present
+            if (input.onsiteStartDate != null) {
+                Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
+                Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
+                Date weekStart = input.onsiteStartDate.addDays(daysToMonday);
+                Date weekEnd = weekStart.addDays(6);
+                input.postStartDate = weekEnd.addDays(1);
             } else {
                 input.postStartDate = input.cat3EndDate.addDays(1);
             }
@@ -146,29 +168,69 @@ public with sharing class ScheduleHoursDistributor {
         Integer workDays = input.numberOfWorkDays;
 
 
+        // --- New Onsite Gap Exception: zero out the week containing onsiteStartDate first ---
+        Set<Date> onsiteGapDates = new Set<Date>();
+        if (input.onsiteStartDate != null) {
+            Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
+            Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
+            Date weekStart = input.onsiteStartDate.addDays(daysToMonday);
+            Date weekEnd = weekStart.addDays(6);
+            addSegmentException(exceptions, input, weekStart, weekEnd, workDays, 0, holidayDates);
+            for (Date d = weekStart; d <= weekEnd; d = d.addDays(1)) {
+                onsiteGapDates.add(d);
+            }
+        }
+
+        // Handle Category 3 as up to two non-overlapping segments (before and after onsite gap week)
+        if (input.cat3Weeks > 0 && input.cat3StartDate != null && input.cat3EndDate != null) {
+            Date cat3Start = input.cat3StartDate;
+            Date cat3End = input.cat3EndDate;
+            Date gapStart = null;
+            Date gapEnd = null;
+            if (input.onsiteStartDate != null) {
+                Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
+                Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
+                gapStart = input.onsiteStartDate.addDays(daysToMonday);
+                gapEnd = gapStart.addDays(6);
+            }
+            // Segment before gap
+            if (gapStart != null && cat3Start < gapStart && cat3End >= gapStart) {
+                addSegmentException(exceptions, input, cat3Start, gapStart.addDays(-1), workDays, hoursPerWeekCat3, holidayDates);
+            }
+            // Segment after gap
+            if (gapEnd != null && cat3End > gapEnd && cat3Start <= gapEnd) {
+                addSegmentException(exceptions, input, gapEnd.addDays(1), cat3End, workDays, hoursPerWeekCat3, holidayDates);
+            }
+            // If no gap or gap does not overlap, do the whole range
+            if (gapStart == null || cat3End < gapStart || cat3Start > gapEnd) {
+                addSegmentException(exceptions, input, cat3Start, cat3End, workDays, hoursPerWeekCat3, holidayDates);
+            }
+        }
+
+        // Now proceed with normal weekly exception logic, skipping onsite gap days and Cat3 days (handled above)
         while (currentStartDate <= input.endDate) {
             Date currentEndDate = currentStartDate.addDays(6);
             if (currentEndDate > input.endDate) currentEndDate = input.endDate;
 
-            // Split the week into segments by category and onsite
             Date segmentStart = currentStartDate;
             Decimal currentHours = null;
-            Boolean currentIsOnsite = null;
             for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
-                Boolean isOnsite = (input.onsiteStartDate != null && input.onsiteEndDate != null && d >= input.onsiteStartDate && d <= input.onsiteEndDate);
-                Decimal hoursForDay = isOnsite ? 0 : getHoursPerWeekForDate(d, input, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost);
+                if (onsiteGapDates.contains(d)) continue; // skip onsite gap days
+                // Skip Category 3 days (handled above)
+                if (input.cat3Weeks > 0 && input.cat3StartDate != null && input.cat3EndDate != null && d >= input.cat3StartDate && d <= input.cat3EndDate) continue;
+                Decimal hoursForDay = getHoursPerWeekForDate(d, input, hoursPerWeekCat1, hoursPerWeekCat2, 0, hoursPerWeekPost); // Cat3 handled above
                 if (currentHours == null) {
                     currentHours = hoursForDay;
-                    currentIsOnsite = isOnsite;
                     segmentStart = d;
-                } else if (hoursForDay != currentHours || isOnsite != currentIsOnsite) {
+                } else if (hoursForDay != currentHours) {
                     addSegmentException(exceptions, input, segmentStart, d.addDays(-1), workDays, currentHours, holidayDates);
                     currentHours = hoursForDay;
-                    currentIsOnsite = isOnsite;
                     segmentStart = d;
                 }
             }
-            addSegmentException(exceptions, input, segmentStart, currentEndDate, workDays, currentHours, holidayDates);
+            if (currentHours != null) {
+                addSegmentException(exceptions, input, segmentStart, currentEndDate, workDays, currentHours, holidayDates);
+            }
 
             currentStartDate = currentStartDate.addDays(7);
         }
