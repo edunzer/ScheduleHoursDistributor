@@ -1,143 +1,200 @@
 public with sharing class ScheduleHoursDistributor {
 
-    // Main method: Generates schedule exception records based on input parameters without inserting them
-    @InvocableMethod(label='Generate Hours Distrobution Schedule Exceptions' description='Calculates and returns Schedule Exception records without inserting them.')
-    public static List<ScheduleExceptionOutputWrapper> generateScheduleExceptions(List<ScheduleInput> inputList) {
+    @InvocableMethod(label='Generate Category Schedule Exceptions' description='Generates schedule exception records for a category, skipping holidays.')
+    public static List<ScheduleExceptionOutputWrapper> generateCategoryScheduleExceptions(List<ScheduleInput> inputList) {
         List<ScheduleExceptionOutputWrapper> outputList = new List<ScheduleExceptionOutputWrapper>();
         try {
-            if (inputList.isEmpty()) {
+            if (inputList == null || inputList.isEmpty()) {
                 return new List<ScheduleExceptionOutputWrapper>();
             }
-
-            // Extract and validate input
             ScheduleInput input = inputList[0];
 
-            if (input.scheduleId == null) {
-                return returnErrorWrapper('Error: Schedule ID cannot be null.');
-            }
-            if (input.startDate == null) {
-                return returnErrorWrapper('Error: Start Date cannot be null.');
-            }
-            if (input.endDate == null) {
-                return returnErrorWrapper('Error: End Date cannot be null.');
-            }
-            if (input.numberOfHours == null) {
-                return returnErrorWrapper('Error: Number of Hours cannot be null.');
-            }
-            if (input.numberOfWorkDays == null) {
-                return returnErrorWrapper('Error: Number of Work Days cannot be null.');
-            }
-            if (input.cat1Weeks == null || input.cat2Weeks == null || input.cat3Weeks == null || input.postWeeks == null) {
+            // Input validation
+            if (input.scheduleId == null) return returnErrorWrapper('Error: Schedule ID cannot be null.');
+            if (input.startDate == null) return returnErrorWrapper('Error: Start Date cannot be null.');
+            if (input.endDate == null) return returnErrorWrapper('Error: End Date cannot be null.');
+            if (input.numberOfHours == null) return returnErrorWrapper('Error: Number of Hours cannot be null.');
+            if (input.numberOfWorkDays == null) return returnErrorWrapper('Error: Number of Work Days cannot be null.');
+            if (input.cat1Weeks == null || input.cat2Weeks == null || input.cat3Weeks == null || input.postWeeks == null)
                 return returnErrorWrapper('Error: Week values cannot be null.');
-            }
-            if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null) {
+            if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null)
                 return returnErrorWrapper('Error: Percentage values cannot be null.');
-            }
-            // Onsite dates validation
-            if ((input.onsiteStartDate != null && input.onsiteEndDate == null) || (input.onsiteStartDate == null && input.onsiteEndDate != null)) {
+            if ((input.onsiteStartDate != null && input.onsiteEndDate == null) || (input.onsiteStartDate == null && input.onsiteEndDate != null))
                 return returnErrorWrapper('Error: Both Onsite Start Date and Onsite End Date must be provided.');
+
+            // 1. Calculate holidays
+            Set<Date> holidayDates = extractHolidayDates(input.existingExceptions);
+
+            // 2. Onsite needed check
+            Boolean onsiteNeeded = false;
+            if (input.onsiteStartDate != null && input.onsiteEndDate != null) {
+                Integer onsiteDays = input.onsiteStartDate.daysBetween(input.onsiteEndDate) + 1;
+                onsiteNeeded = onsiteDays < 30 && input.onsiteStartDate >= input.startDate && input.onsiteEndDate <= input.endDate;
             }
 
-            input.cat1Weeks = (input.cat1Weeks == null) ? 0 : input.cat1Weeks;
-            input.cat2Weeks = (input.cat2Weeks == null) ? 0 : input.cat2Weeks;
-            input.cat3Weeks = (input.cat3Weeks == null) ? 0 : input.cat3Weeks;
-            input.postWeeks = (input.postWeeks == null) ? 0 : input.postWeeks;
-
-
-            // --- New Onsite Gap Logic ---
-            // If onsiteStartDate is provided, zero out the entire week containing it (Monday-Sunday)
+            // 3. Onsite gap (if needed): 1 week (Mon-Sun) containing onsiteStartDate, but only non-holiday days
             Set<Date> onsiteGapDates = new Set<Date>();
-            if (input.onsiteStartDate != null) {
-                // Find Monday of the week containing onsiteStartDate (Apex: 1=Sunday, 2=Monday, ..., 7=Saturday)
+            Date onsiteGapWeekStart = null;
+            Date onsiteGapWeekEnd = null;
+            if (onsiteNeeded) {
                 Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
-                Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek; // If Sunday, go back 6 days; else, go back to Monday
-                Date weekStart = input.onsiteStartDate.addDays(daysToMonday);
-                Date weekEnd = weekStart.addDays(6); // Sunday
-                for (Date d = weekStart; d <= weekEnd; d = d.addDays(1)) {
-                    onsiteGapDates.add(d);
+                Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
+                onsiteGapWeekStart = input.onsiteStartDate.addDays(daysToMonday);
+                onsiteGapWeekEnd = onsiteGapWeekStart.addDays(6);
+                for (Date d = onsiteGapWeekStart; d <= onsiteGapWeekEnd; d = d.addDays(1)) {
+                    if (!holidayDates.contains(d)) {
+                        onsiteGapDates.add(d);
+                    }
                 }
             }
 
-            // Calculate category date ranges
-            input.cat1StartDate = input.startDate;
-            input.cat1EndDate = input.cat1StartDate.addDays(((Integer) input.cat1Weeks * 7) - 1);
-            input.cat2StartDate = input.cat1EndDate.addDays(1);
-            input.cat2EndDate = input.cat2StartDate.addDays(((Integer) input.cat2Weeks * 7) - 1);
-            input.cat3StartDate = input.cat2EndDate.addDays(1);
-            input.cat3EndDate = input.cat3StartDate.addDays(((Integer) input.cat3Weeks * 7) - 1);
+            // 4. Calculate category date ranges and determine which categories are valid (work backwards)
+            // We'll use days, not weeks, for flexibility
+            Integer cat1Days = (input.cat1Weeks == null ? 0 : Integer.valueOf(input.cat1Weeks * 7));
+            Integer cat2Days = (input.cat2Weeks == null ? 0 : Integer.valueOf(input.cat2Weeks * 7));
+            Integer cat3Days = (input.cat3Weeks == null ? 0 : Integer.valueOf(input.cat3Weeks * 7));
+            Integer postDays = (input.postWeeks == null ? 0 : Integer.valueOf(input.postWeeks * 7));
 
-            // No need to remove onsite gap days from Category 3 here; handled in exception generation
+            // Track which categories are valid
+            Boolean postValid = onsiteNeeded;
+            Boolean cat3Valid = true;
+            Boolean cat2Valid = true;
+            Boolean cat1Valid = true;
 
-            // Set postStartDate to the day after the onsite gap week if onsiteStartDate is present
-            if (input.onsiteStartDate != null) {
-                Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
-                Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
-                Date weekStart = input.onsiteStartDate.addDays(daysToMonday);
-                Date weekEnd = weekStart.addDays(6);
-                input.postStartDate = weekEnd.addDays(1);
-            } else {
-                input.postStartDate = input.cat3EndDate.addDays(1);
-            }
-            Date calculatedPostEnd = input.postStartDate.addDays(((Integer) input.postWeeks * 7) - 1);
-            input.postEndDate = (calculatedPostEnd > input.endDate) ? input.endDate : calculatedPostEnd;
-
-            input.cat1Percentage = (input.cat1Percentage == null) ? 0 : input.cat1Percentage;
-            input.cat2Percentage = (input.cat2Percentage == null) ? 0 : input.cat2Percentage;
-            input.cat3Percentage = (input.cat3Percentage == null) ? 0 : input.cat3Percentage;
-            input.postPercentage = (input.postPercentage == null) ? 0 : input.postPercentage;
-
-            input.numberOfWorkDays = (input.numberOfWorkDays == null) ? 0 : input.numberOfWorkDays;
-            input.numberOfHours = (input.numberOfHours == null) ? 0 : input.numberOfHours;
-
-            Decimal totalWeeks = input.cat1Weeks + input.cat2Weeks + input.cat3Weeks + input.postWeeks;
-
-            if (totalWeeks == 0 || input.numberOfHours == 0) {
-                return new List<ScheduleExceptionOutputWrapper>();
+            // Calculate post category range (if valid)
+            Date postStart = null;
+            Date postEnd = null;
+            if (postValid) {
+                postEnd = input.endDate;
+                postStart = onsiteGapWeekEnd != null ? onsiteGapWeekEnd.addDays(1) : input.endDate.addDays(1); // If no onsite, post not valid
+                if (postStart > postEnd) {
+                    postValid = false;
+                }
             }
 
-            Set<Date> holidayDates = extractHolidayDates(input.existingExceptions);
+            // Calculate cat3 range
+            Date cat3End = postValid ? onsiteGapWeekStart.addDays(-1) : input.endDate;
+            Date cat3Start = cat3End.addDays(-cat3Days + 1);
+            if (cat3Start < input.startDate) {
+                // Not enough room for cat3, drop and redistribute
+                cat3Valid = false;
+                cat3Start = null;
+                cat3End = null;
+            }
+            // If cat3 is dropped, post gets its hours
 
-            Integer cat1Holidays = countHolidaysInRange(holidayDates, input.cat1StartDate, input.cat1EndDate);
-            Integer cat2Holidays = countHolidaysInRange(holidayDates, input.cat2StartDate, input.cat2EndDate);
-            Integer cat3Holidays = countHolidaysInRange(holidayDates, input.cat3StartDate, input.cat3EndDate);
-            Integer postHolidays = countHolidaysInRange(holidayDates, input.postStartDate, input.postEndDate);
+            // Calculate cat2 range
+            Date cat2End = cat3Valid && cat3Start != null ? cat3Start.addDays(-1) : (postValid && postStart != null ? postStart.addDays(-1) : input.endDate);
+            Date cat2Start = cat2End.addDays(-cat2Days + 1);
+            if (cat2Start < input.startDate) {
+                cat2Valid = false;
+                cat2Start = null;
+                cat2End = null;
+            }
 
-            Integer cat1HolidayWeeks = cat1Holidays / input.numberOfWorkDays;
-            Integer cat2HolidayWeeks = cat2Holidays / input.numberOfWorkDays;
-            Integer cat3HolidayWeeks = cat3Holidays / input.numberOfWorkDays;
-            Integer postHolidayWeeks = postHolidays / input.numberOfWorkDays;
+            // Calculate cat1 range
+            Date cat1End = cat2Valid && cat2Start != null ? cat2Start.addDays(-1) : (cat3Valid && cat3Start != null ? cat3Start.addDays(-1) : (postValid && postStart != null ? postStart.addDays(-1) : input.endDate));
+            Date cat1Start = cat1End.addDays(-cat1Days + 1);
+            if (cat1Start < input.startDate) {
+                cat1Valid = false;
+                cat1Start = null;
+                cat1End = null;
+            }
 
-            input.cat1Weeks = input.cat1Weeks - cat1HolidayWeeks;
-            input.cat2Weeks = input.cat2Weeks - cat2HolidayWeeks;
-            input.cat3Weeks = input.cat3Weeks - cat3HolidayWeeks;
-            input.postWeeks = input.postWeeks - postHolidayWeeks;
+            // 5. Redistribute percentages: sum valid, get diff from 100, add even split of diff to each valid
+            Decimal cat1Pct = 0, cat2Pct = 0, cat3Pct = 0, postPct = 0;
+            List<Decimal> origPcts = new List<Decimal>();
+            List<String> validCats = new List<String>();
+            if (cat1Valid) { validCats.add('cat1'); origPcts.add(input.cat1Percentage); }
+            if (cat2Valid) { validCats.add('cat2'); origPcts.add(input.cat2Percentage); }
+            if (cat3Valid) { validCats.add('cat3'); origPcts.add(input.cat3Percentage); }
+            if (postValid) { validCats.add('post'); origPcts.add(input.postPercentage); }
+            Integer validCount = validCats.size();
+            Decimal sumValid = 0;
+            for (Decimal pct : origPcts) sumValid += pct;
+            Decimal diff = 100 - sumValid;
+            Decimal addEach = validCount > 0 ? diff / validCount : 0;
+            Integer idx = 0;
+            for (String cat : validCats) {
+                Decimal pct = origPcts[idx] + addEach;
+                if (cat == 'cat1') cat1Pct = pct;
+                if (cat == 'cat2') cat2Pct = pct;
+                if (cat == 'cat3') cat3Pct = pct;
+                if (cat == 'post') postPct = pct;
+                idx++;
+            }
 
-            // Calculate hours per week per category
-            Decimal hoursPerWeekCat1 = (input.cat1Weeks > 0) ? ((input.cat1Percentage/100) * input.numberOfHours) / input.cat1Weeks : 0;
-            Decimal hoursPerWeekCat2 = (input.cat2Weeks > 0) ? ((input.cat2Percentage/100) * input.numberOfHours) / input.cat2Weeks : 0;
-            Decimal hoursPerWeekCat3 = (input.cat3Weeks > 0) ? ((input.cat3Percentage/100) * input.numberOfHours) / input.cat3Weeks : 0;
-            Decimal hoursPerWeekPost = (input.postWeeks > 0) ? ((input.postPercentage/100) * input.numberOfHours) / input.postWeeks : 0;
+            // 6. Create exceptions for each valid category
+            List<pse__Schedule_Exception__c> allExceptions = new List<pse__Schedule_Exception__c>();
+            Decimal hoursPerWeekCat1 = 0, hoursPerWeekCat2 = 0, hoursPerWeekCat3 = 0, hoursPerWeekPost = 0;
 
-            // Generate exceptions week by week
-            List<pse__Schedule_Exception__c> exceptions = generateExceptions(input, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost, holidayDates);
+            // Helper to create exceptions for a category
+            // Exclude holidays and onsite gap days
+            Set<Date> excludeDates = new Set<Date>();
+            excludeDates.addAll(holidayDates);
+            excludeDates.addAll(onsiteGapDates);
 
-            // Package output
-            outputList.add(new ScheduleExceptionOutputWrapper(exceptions, hoursPerWeekCat1, hoursPerWeekCat2, hoursPerWeekCat3, hoursPerWeekPost, null));
+            if (cat1Valid && cat1Start != null && cat1End != null && cat1Start <= cat1End) {
+                List<Date> cat1DaysList = new List<Date>();
+                for (Date d = cat1Start; d <= cat1End; d = d.addDays(1)) {
+                    if (!excludeDates.contains(d) && d >= input.startDate && d <= input.endDate) cat1DaysList.add(d);
+                }
+                Integer usableDays = cat1DaysList.size();
+                hoursPerWeekCat1 = (usableDays > 0) ? ((cat1Pct/100) * input.numberOfHours) / (usableDays/7.0) : 0;
+                if (usableDays > 0) {
+                    allExceptions.add(createScheduleException(input.scheduleId, cat1Start, cat1End, input.numberOfWorkDays, hoursPerWeekCat1));
+                }
+            }
+            if (cat2Valid && cat2Start != null && cat2End != null && cat2Start <= cat2End) {
+                List<Date> cat2DaysList = new List<Date>();
+                for (Date d = cat2Start; d <= cat2End; d = d.addDays(1)) {
+                    if (!excludeDates.contains(d) && d >= input.startDate && d <= input.endDate) cat2DaysList.add(d);
+                }
+                Integer usableDays = cat2DaysList.size();
+                hoursPerWeekCat2 = (usableDays > 0) ? ((cat2Pct/100) * input.numberOfHours) / (usableDays/7.0) : 0;
+                if (usableDays > 0) {
+                    allExceptions.add(createScheduleException(input.scheduleId, cat2Start, cat2End, input.numberOfWorkDays, hoursPerWeekCat2));
+                }
+            }
+            if (cat3Valid && cat3Start != null && cat3End != null && cat3Start <= cat3End) {
+                List<Date> cat3DaysList = new List<Date>();
+                for (Date d = cat3Start; d <= cat3End; d = d.addDays(1)) {
+                    if (!excludeDates.contains(d) && d >= input.startDate && d <= input.endDate) cat3DaysList.add(d);
+                }
+                Integer usableDays = cat3DaysList.size();
+                hoursPerWeekCat3 = (usableDays > 0) ? ((cat3Pct/100) * input.numberOfHours) / (usableDays/7.0) : 0;
+                if (usableDays > 0) {
+                    allExceptions.add(createScheduleException(input.scheduleId, cat3Start, cat3End, input.numberOfWorkDays, hoursPerWeekCat3));
+                }
+            }
+            if (postValid && postStart != null && postEnd != null && postStart <= postEnd) {
+                List<Date> postDaysList = new List<Date>();
+                for (Date d = postStart; d <= postEnd; d = d.addDays(1)) {
+                    if (!excludeDates.contains(d) && d >= input.startDate && d <= input.endDate) postDaysList.add(d);
+                }
+                Integer usableDays = postDaysList.size();
+                hoursPerWeekPost = (usableDays > 0) ? ((postPct/100) * input.numberOfHours) / (usableDays/7.0) : 0;
+                if (usableDays > 0) {
+                    allExceptions.add(createScheduleException(input.scheduleId, postStart, postEnd, input.numberOfWorkDays, hoursPerWeekPost));
+                }
+            }
+
+            outputList.add(new ScheduleExceptionOutputWrapper(
+                allExceptions,
+                hoursPerWeekCat1,
+                hoursPerWeekCat2,
+                hoursPerWeekCat3,
+                hoursPerWeekPost,
+                null
+            ));
         } catch (Exception e) {
-            outputList.add(new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 0, 0, 0, 0, e.getMessage()));
+            return returnErrorWrapper('Error: ' + e.getMessage());
         }
         return outputList;
     }
 
-    // Helper method: returns a wrapper with an error message
-    private static List<ScheduleExceptionOutputWrapper> returnErrorWrapper(String errorMessage) {
-        return new List<ScheduleExceptionOutputWrapper>{
-            new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 0, 0, 0, 0, errorMessage)
-        };
-    }
-
-    // Helper method: extracts all holiday dates from existing exceptions
-    private static Set<Date> extractHolidayDates(List<pse__Schedule_Exception__c> existingExceptions) {
+    // Helper: Extracts all holiday dates from existing exceptions
+    public static Set<Date> extractHolidayDates(List<pse__Schedule_Exception__c> existingExceptions) {
         Set<Date> holidayDates = new Set<Date>();
         if (existingExceptions != null) {
             for (pse__Schedule_Exception__c exc : existingExceptions) {
@@ -147,99 +204,8 @@ public with sharing class ScheduleHoursDistributor {
         return holidayDates;
     }
 
-    // Helper method: counts how many holidays fall within a specific date range
-    private static Integer countHolidaysInRange(Set<Date> holidayDates, Date startDate, Date endDate) {
-        Integer count = 0;
-        for (Date d : holidayDates) {
-            if (d >= startDate && d <= endDate) {
-                count++;
-            }
-        }
-        return count;
-    }
-
-    // Main calculation method: generates schedule exception records for each week
-    private static List<pse__Schedule_Exception__c> generateExceptions(
-        ScheduleInput input, Decimal hoursPerWeekCat1, Decimal hoursPerWeekCat2,
-        Decimal hoursPerWeekCat3, Decimal hoursPerWeekPost, Set<Date> holidayDates
-    ) {
-        List<pse__Schedule_Exception__c> exceptions = new List<pse__Schedule_Exception__c>();
-        Date currentStartDate = input.startDate;
-        Integer workDays = input.numberOfWorkDays;
-
-
-        // --- New Onsite Gap Exception: zero out the week containing onsiteStartDate first ---
-        Set<Date> onsiteGapDates = new Set<Date>();
-        if (input.onsiteStartDate != null) {
-            Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
-            Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
-            Date weekStart = input.onsiteStartDate.addDays(daysToMonday);
-            Date weekEnd = weekStart.addDays(6);
-            addSegmentException(exceptions, input, weekStart, weekEnd, workDays, 0, holidayDates);
-            for (Date d = weekStart; d <= weekEnd; d = d.addDays(1)) {
-                onsiteGapDates.add(d);
-            }
-        }
-
-        // Handle Category 3 as up to two non-overlapping segments (before and after onsite gap week)
-        if (input.cat3Weeks > 0 && input.cat3StartDate != null && input.cat3EndDate != null) {
-            Date cat3Start = input.cat3StartDate;
-            Date cat3End = input.cat3EndDate;
-            Date gapStart = null;
-            Date gapEnd = null;
-            if (input.onsiteStartDate != null) {
-                Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
-                Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
-                gapStart = input.onsiteStartDate.addDays(daysToMonday);
-                gapEnd = gapStart.addDays(6);
-            }
-            // Segment before gap
-            if (gapStart != null && cat3Start < gapStart && cat3End >= gapStart) {
-                addSegmentException(exceptions, input, cat3Start, gapStart.addDays(-1), workDays, hoursPerWeekCat3, holidayDates);
-            }
-            // Segment after gap
-            if (gapEnd != null && cat3End > gapEnd && cat3Start <= gapEnd) {
-                addSegmentException(exceptions, input, gapEnd.addDays(1), cat3End, workDays, hoursPerWeekCat3, holidayDates);
-            }
-            // If no gap or gap does not overlap, do the whole range
-            if (gapStart == null || cat3End < gapStart || cat3Start > gapEnd) {
-                addSegmentException(exceptions, input, cat3Start, cat3End, workDays, hoursPerWeekCat3, holidayDates);
-            }
-        }
-
-        // Now proceed with normal weekly exception logic, skipping onsite gap days and Cat3 days (handled above)
-        while (currentStartDate <= input.endDate) {
-            Date currentEndDate = currentStartDate.addDays(6);
-            if (currentEndDate > input.endDate) currentEndDate = input.endDate;
-
-            Date segmentStart = currentStartDate;
-            Decimal currentHours = null;
-            for (Date d = currentStartDate; d <= currentEndDate; d = d.addDays(1)) {
-                if (onsiteGapDates.contains(d)) continue; // skip onsite gap days
-                // Skip Category 3 days (handled above)
-                if (input.cat3Weeks > 0 && input.cat3StartDate != null && input.cat3EndDate != null && d >= input.cat3StartDate && d <= input.cat3EndDate) continue;
-                Decimal hoursForDay = getHoursPerWeekForDate(d, input, hoursPerWeekCat1, hoursPerWeekCat2, 0, hoursPerWeekPost); // Cat3 handled above
-                if (currentHours == null) {
-                    currentHours = hoursForDay;
-                    segmentStart = d;
-                } else if (hoursForDay != currentHours) {
-                    addSegmentException(exceptions, input, segmentStart, d.addDays(-1), workDays, currentHours, holidayDates);
-                    currentHours = hoursForDay;
-                    segmentStart = d;
-                }
-            }
-            if (currentHours != null) {
-                addSegmentException(exceptions, input, segmentStart, currentEndDate, workDays, currentHours, holidayDates);
-            }
-
-            currentStartDate = currentStartDate.addDays(7);
-        }
-
-        return exceptions;
-    }
-
-    // Creates and returns a single schedule exception record without inserting
-    private static pse__Schedule_Exception__c createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay) {
+    // Helper: Creates and returns a single schedule exception record
+    public static pse__Schedule_Exception__c createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay) {
         return new pse__Schedule_Exception__c(
             pse__Schedule__c = scheduleId,
             pse__Date__c = startDate,
@@ -254,47 +220,11 @@ public with sharing class ScheduleHoursDistributor {
         );
     }
 
-    // Helper method to determine hours per week for a given date
-    private static Decimal getHoursPerWeekForDate(Date d, ScheduleInput input, Decimal hoursPerWeekCat1, Decimal hoursPerWeekCat2, Decimal hoursPerWeekCat3, Decimal hoursPerWeekPost) {
-        if (input.cat1Weeks > 0 && d >= input.cat1StartDate && d <= input.cat1EndDate) {
-            return hoursPerWeekCat1;
-        } else if (input.cat2Weeks > 0 && d >= input.cat2StartDate && d <= input.cat2EndDate) {
-            return hoursPerWeekCat2;
-        } else if (input.cat3Weeks > 0 && d >= input.cat3StartDate && d <= input.cat3EndDate) {
-            return hoursPerWeekCat3;
-        } else if (input.postWeeks > 0 && d >= input.postStartDate && d <= input.postEndDate) {
-            return hoursPerWeekPost;
-        } else {
-            return 0;
-        }
-    }
-
-    // Helper to add a segment exception, splitting by holidays
-    private static void addSegmentException(List<pse__Schedule_Exception__c> exceptions, ScheduleInput input, Date segStart, Date segEnd, Integer workDays, Decimal hoursPerWeek, Set<Date> holidayDates) {
-        if (segStart > segEnd) return;
-        // Calculate holidays in this segment
-        List<Date> holidaysInSegment = new List<Date>();
-        for (Date d = segStart; d <= segEnd; d = d.addDays(1)) {
-            if (holidayDates.contains(d)) {
-                holidaysInSegment.add(d);
-            }
-        }
-        Integer workDaysInSegment = workDays - holidaysInSegment.size();
-        Decimal hoursPerDay = (workDaysInSegment > 0) ? (hoursPerWeek / workDaysInSegment) : 0;
-        if (!holidaysInSegment.isEmpty()) {
-            Date segmentStart = segStart;
-            for (Date holiday : holidaysInSegment) {
-                if (segmentStart < holiday) {
-                    exceptions.add(createScheduleException(input.scheduleId, segmentStart, holiday.addDays(-1), workDays, hoursPerDay));
-                }
-                segmentStart = holiday.addDays(1);
-            }
-            if (segmentStart <= segEnd) {
-                exceptions.add(createScheduleException(input.scheduleId, segmentStart, segEnd, workDays, hoursPerDay));
-            }
-        } else {
-            exceptions.add(createScheduleException(input.scheduleId, segStart, segEnd, workDays, hoursPerDay));
-        }
+    // Helper: Returns a wrapper with an error message
+    private static List<ScheduleExceptionOutputWrapper> returnErrorWrapper(String errorMessage) {
+        return new List<ScheduleExceptionOutputWrapper>{
+            new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 0, errorMessage)
+        };
     }
 
     // Wrapper class: Holds output schedule exceptions and calculated values
