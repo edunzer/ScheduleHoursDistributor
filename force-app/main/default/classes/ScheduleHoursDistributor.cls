@@ -223,7 +223,10 @@ public with sharing class ScheduleHoursDistributor {
     // Helper: Returns a wrapper with an error message
     private static List<ScheduleExceptionOutputWrapper> returnErrorWrapper(String errorMessage) {
         return new List<ScheduleExceptionOutputWrapper>{
-            new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 0, errorMessage)
+            new ScheduleExceptionOutputWrapper(
+                new List<pse__Schedule_Exception__c>(),
+                0, 0, 0, 0, errorMessage
+            )
         };
     }
 
