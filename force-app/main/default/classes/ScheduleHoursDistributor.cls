@@ -59,6 +59,7 @@ public with sharing class ScheduleHoursDistributor {
             Boolean cat2Valid = true;
             Boolean cat1Valid = true;
 
+
             // Calculate post category range (if valid)
             Date postStart = null;
             Date postEnd = null;
@@ -73,31 +74,30 @@ public with sharing class ScheduleHoursDistributor {
             // Calculate cat3 range
             Date cat3End = postValid ? onsiteGapWeekStart.addDays(-1) : input.endDate;
             Date cat3Start = cat3End.addDays(-cat3Days + 1);
-            if (cat3Start < input.startDate) {
-                // Not enough room for cat3, drop and redistribute
-                cat3Valid = false;
-                cat3Start = null;
-                cat3End = null;
-            }
-            // If cat3 is dropped, post gets its hours
 
             // Calculate cat2 range
-            Date cat2End = cat3Valid && cat3Start != null ? cat3Start.addDays(-1) : (postValid && postStart != null ? postStart.addDays(-1) : input.endDate);
+            Date cat2End = cat3Start.addDays(-1);
             Date cat2Start = cat2End.addDays(-cat2Days + 1);
-            if (cat2Start < input.startDate) {
-                cat2Valid = false;
-                cat2Start = null;
-                cat2End = null;
-            }
 
             // Calculate cat1 range
-            Date cat1End = cat2Valid && cat2Start != null ? cat2Start.addDays(-1) : (cat3Valid && cat3Start != null ? cat3Start.addDays(-1) : (postValid && postStart != null ? postStart.addDays(-1) : input.endDate));
+            Date cat1End = cat2Start.addDays(-1);
             Date cat1Start = cat1End.addDays(-cat1Days + 1);
-            if (cat1Start < input.startDate) {
-                cat1Valid = false;
-                cat1Start = null;
-                cat1End = null;
-            }
+
+            // Trim category ranges to input range and set validity
+            cat1Valid = (cat1End >= input.startDate && cat1Start <= input.endDate);
+            cat2Valid = (cat2End >= input.startDate && cat2Start <= input.endDate);
+            cat3Valid = (cat3End >= input.startDate && cat3Start <= input.endDate);
+            postValid = (postEnd >= input.startDate && postStart <= input.endDate && postValid);
+
+            // Calculate actual (trimmed) start/end for each valid category
+            Date cat1ActualStart = cat1Valid ? (cat1Start > input.startDate ? cat1Start : input.startDate) : null;
+            Date cat1ActualEnd = cat1Valid ? (cat1End < input.endDate ? cat1End : input.endDate) : null;
+            Date cat2ActualStart = cat2Valid ? (cat2Start > input.startDate ? cat2Start : input.startDate) : null;
+            Date cat2ActualEnd = cat2Valid ? (cat2End < input.endDate ? cat2End : input.endDate) : null;
+            Date cat3ActualStart = cat3Valid ? (cat3Start > input.startDate ? cat3Start : input.startDate) : null;
+            Date cat3ActualEnd = cat3Valid ? (cat3End < input.endDate ? cat3End : input.endDate) : null;
+            Date postActualStart = postValid ? (postStart > input.startDate ? postStart : input.startDate) : null;
+            Date postActualEnd = postValid ? (postEnd < input.endDate ? postEnd : input.endDate) : null;
 
             // 5. Redistribute percentages: sum valid, get diff from 100, add even split of diff to each valid
             Decimal cat1Pct = 0, cat2Pct = 0, cat3Pct = 0, postPct = 0;
@@ -122,7 +122,6 @@ public with sharing class ScheduleHoursDistributor {
                 idx++;
             }
 
-
             // 6. Create exceptions for each valid category, ensuring no overlap and onsite gap is its own exception
             List<pse__Schedule_Exception__c> allExceptions = new List<pse__Schedule_Exception__c>();
 
@@ -130,12 +129,10 @@ public with sharing class ScheduleHoursDistributor {
             Set<Date> excludeDates = new Set<Date>();
             excludeDates.addAll(holidayDates);
 
-
             // 6a. Onsite gap exception (if needed)
             if (onsiteNeeded && onsiteGapWeekStart != null && onsiteGapWeekEnd != null) {
                 allExceptions.add(createScheduleException(input.scheduleId, onsiteGapWeekStart, onsiteGapWeekEnd, input.numberOfWorkDays, 0));
             }
-
 
             // Helper to create category exceptions, splitting at every holiday and onsite gap day
             Set<Date> allSplits = new Set<Date>();
@@ -151,20 +148,20 @@ public with sharing class ScheduleHoursDistributor {
             };
 
             // Cat1
-            if (cat1Valid && cat1Start != null && cat1End != null && cat1Start <= cat1End) {
-                ScheduleHoursDistributor.addSplitExceptions(cat1Start, cat1End, cat1Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
+            if (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd) {
+                ScheduleHoursDistributor.addSplitExceptions(cat1ActualStart, cat1ActualEnd, cat1Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
             }
             // Cat2
-            if (cat2Valid && cat2Start != null && cat2End != null && cat2Start <= cat2End) {
-                ScheduleHoursDistributor.addSplitExceptions(cat2Start, cat2End, cat2Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat2'));
+            if (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd) {
+                ScheduleHoursDistributor.addSplitExceptions(cat2ActualStart, cat2ActualEnd, cat2Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat2'));
             }
             // Cat3
-            if (cat3Valid && cat3Start != null && cat3End != null && cat3Start <= cat3End) {
-                ScheduleHoursDistributor.addSplitExceptions(cat3Start, cat3End, cat3Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat3'));
+            if (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd) {
+                ScheduleHoursDistributor.addSplitExceptions(cat3ActualStart, cat3ActualEnd, cat3Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat3'));
             }
             // Post
-            if (postValid && postStart != null && postEnd != null && postStart <= postEnd) {
-                ScheduleHoursDistributor.addSplitExceptions(postStart, postEnd, postPct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
+            if (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd) {
+                ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postPct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
             }
 
 
