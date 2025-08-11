@@ -125,7 +125,6 @@ public with sharing class ScheduleHoursDistributor {
 
             // 6. Create exceptions for each valid category, ensuring no overlap and onsite gap is its own exception
             List<pse__Schedule_Exception__c> allExceptions = new List<pse__Schedule_Exception__c>();
-            Decimal hoursPerWeekCat1 = 0, hoursPerWeekCat2 = 0, hoursPerWeekCat3 = 0, hoursPerWeekPost = 0;
 
             // Exclude holidays for all categories
             Set<Date> excludeDates = new Set<Date>();
@@ -137,35 +136,42 @@ public with sharing class ScheduleHoursDistributor {
                 allExceptions.add(createScheduleException(input.scheduleId, onsiteGapWeekStart, onsiteGapWeekEnd, input.numberOfWorkDays, 0));
             }
 
+
             // Helper to create category exceptions, splitting at every holiday and onsite gap day
             Set<Date> allSplits = new Set<Date>();
             allSplits.addAll(holidayDates);
             allSplits.addAll(onsiteGapDates);
 
+            // Track exceptions by category
+            Map<String, List<pse__Schedule_Exception__c>> catExceptions = new Map<String, List<pse__Schedule_Exception__c>>{
+                'cat1' => new List<pse__Schedule_Exception__c>(),
+                'cat2' => new List<pse__Schedule_Exception__c>(),
+                'cat3' => new List<pse__Schedule_Exception__c>(),
+                'post' => new List<pse__Schedule_Exception__c>()
+            };
+
             // Cat1
             if (cat1Valid && cat1Start != null && cat1End != null && cat1Start <= cat1End) {
-                ScheduleHoursDistributor.addSplitExceptions(cat1Start, cat1End, cat1Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions);
+                ScheduleHoursDistributor.addSplitExceptions(cat1Start, cat1End, cat1Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
             }
             // Cat2
             if (cat2Valid && cat2Start != null && cat2End != null && cat2Start <= cat2End) {
-                ScheduleHoursDistributor.addSplitExceptions(cat2Start, cat2End, cat2Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions);
+                ScheduleHoursDistributor.addSplitExceptions(cat2Start, cat2End, cat2Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat2'));
             }
             // Cat3
             if (cat3Valid && cat3Start != null && cat3End != null && cat3Start <= cat3End) {
-                ScheduleHoursDistributor.addSplitExceptions(cat3Start, cat3End, cat3Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions);
+                ScheduleHoursDistributor.addSplitExceptions(cat3Start, cat3End, cat3Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat3'));
             }
             // Post
             if (postValid && postStart != null && postEnd != null && postStart <= postEnd) {
-                ScheduleHoursDistributor.addSplitExceptions(postStart, postEnd, postPct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions);
+                ScheduleHoursDistributor.addSplitExceptions(postStart, postEnd, postPct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
             }
+
+
 
 
             outputList.add(new ScheduleExceptionOutputWrapper(
                 allExceptions,
-                hoursPerWeekCat1,
-                hoursPerWeekCat2,
-                hoursPerWeekCat3,
-                hoursPerWeekPost,
                 null
             ));
         } catch (Exception e) {
@@ -206,13 +212,15 @@ public with sharing class ScheduleHoursDistributor {
         return new List<ScheduleExceptionOutputWrapper>{
             new ScheduleExceptionOutputWrapper(
                 new List<pse__Schedule_Exception__c>(),
-                0, 0, 0, 0, errorMessage
+                errorMessage
             )
         };
     }
 
     // Helper: Adds split exceptions for a category, splitting at every holiday and onsite gap day
-    public static void addSplitExceptions(Date segStart, Date segEnd, Decimal pct, Integer workDays, Id scheduleId, Decimal numberOfHours, Date inputStart, Date inputEnd, Set<Date> allSplits, List<pse__Schedule_Exception__c> allExceptions) {
+    public static void addSplitExceptions(
+        Date segStart, Date segEnd, Decimal pct, Integer workDays, Id scheduleId, Decimal numberOfHours, Date inputStart, Date inputEnd, Set<Date> allSplits, List<pse__Schedule_Exception__c> allExceptions, List<pse__Schedule_Exception__c> catList
+    ) {
         Date currStart = null;
         Integer usableDays = 0;
         for (Date d = segStart; d <= segEnd.addDays(1); d = d.addDays(1)) {
@@ -223,9 +231,11 @@ public with sharing class ScheduleHoursDistributor {
             } else if (currStart != null && !isSplit && d >= inputStart && d <= inputEnd) {
                 usableDays++;
             } else if (currStart != null && isSplit) {
-                Decimal hoursPerWeek = (usableDays > 0) ? ((pct/100) * numberOfHours) / (usableDays/7.0) : 0;
+                Decimal hoursPerDay = (usableDays > 0) ? ((pct/100) * numberOfHours) / usableDays : 0;
                 if (usableDays > 0) {
-                    allExceptions.add(createScheduleException(scheduleId, currStart, d.addDays(-1), workDays, hoursPerWeek));
+                    pse__Schedule_Exception__c exc = createScheduleException(scheduleId, currStart, d.addDays(-1), workDays, hoursPerDay);
+                    allExceptions.add(exc);
+                    catList.add(exc);
                 }
                 currStart = null;
                 usableDays = 0;
@@ -233,32 +243,20 @@ public with sharing class ScheduleHoursDistributor {
         }
     }
 
+
     // Wrapper class: Holds output schedule exceptions and calculated values
     public class ScheduleExceptionOutputWrapper {
         @InvocableVariable(label='Schedule Exceptions' description='List of Schedule Exception records')
         public List<pse__Schedule_Exception__c> scheduleExceptions;
-    
-        @InvocableVariable(label='Hours Per Week - Cat1' description='Calculated hours per week for Category 1')
-        public Decimal hoursPerWeekCat1;
-    
-        @InvocableVariable(label='Hours Per Week - Cat2' description='Calculated hours per week for Category 2')
-        public Decimal hoursPerWeekCat2;
-    
-        @InvocableVariable(label='Hours Per Week - Cat3' description='Calculated hours per week for Category 3')
-        public Decimal hoursPerWeekCat3;
-    
-        @InvocableVariable(label='Hours Per Week - Post' description='Calculated hours per week for Post Category')
-        public Decimal hoursPerWeekPost;
-    
+
         @InvocableVariable(label='Error Message' description='Error encountered during execution')
         public String errorMessage;
-    
-        public ScheduleExceptionOutputWrapper(List<pse__Schedule_Exception__c> exceptions, Decimal cat1Hours, Decimal cat2Hours, Decimal cat3Hours, Decimal postHours, String error) {
+
+        public ScheduleExceptionOutputWrapper(
+            List<pse__Schedule_Exception__c> exceptions,
+            String error
+        ) {
             this.scheduleExceptions = exceptions;
-            this.hoursPerWeekCat1 = cat1Hours;
-            this.hoursPerWeekCat2 = cat2Hours;
-            this.hoursPerWeekCat3 = cat3Hours;
-            this.hoursPerWeekPost = postHours;
             this.errorMessage = error;
         }
     }
