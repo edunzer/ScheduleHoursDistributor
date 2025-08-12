@@ -131,7 +131,11 @@ public with sharing class ScheduleHoursDistributor {
 
             // 6a. Onsite gap exception (if needed)
             if (onsiteNeeded && onsiteGapWeekStart != null && onsiteGapWeekEnd != null) {
-                allExceptions.add(createScheduleException(input.scheduleId, onsiteGapWeekStart, onsiteGapWeekEnd, input.numberOfWorkDays, 0));
+                // Split onsite gap week at holidays
+                addSplitExceptions(
+                    onsiteGapWeekStart, onsiteGapWeekEnd, 0, input.numberOfWorkDays, input.scheduleId,
+                    input.startDate, input.endDate, holidayDates, allExceptions, new List<pse__Schedule_Exception__c>()
+                );
             }
 
             // Helper to create category exceptions, splitting at every holiday and onsite gap day
