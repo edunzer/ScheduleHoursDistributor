@@ -43,7 +43,7 @@ public class ScheduleHoursDistributorTest {
         input.onsiteEndDate = Date.newInstance(2025, 3, 14);
         input.existingExceptions = new List<pse__Schedule_Exception__c>();
 
-        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
 
         // Assertions
         System.assertNotEquals(null, result, 'Result should not be null');
@@ -74,7 +74,7 @@ public class ScheduleHoursDistributorTest {
         input.onsiteEndDate = Date.newInstance(2025, 3, 14);
         input.existingExceptions = new List<pse__Schedule_Exception__c>();
 
-        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
 
         // Assertions
         System.assertNotEquals(null, result, 'Result should not be null');
