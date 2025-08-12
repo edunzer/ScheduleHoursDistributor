@@ -157,21 +157,34 @@ public with sharing class ScheduleHoursDistributor {
             Integer postUsableDays = (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd)
                 ? countUsableWorkdays(postActualStart, postActualEnd, allSplits) : 0;
 
+            // Calculate hours per day for each category
+            Decimal cat1HoursPerDay = (cat1UsableDays > 0) ? ((cat1Pct/100) * input.numberOfHours) / cat1UsableDays : 0;
+            Decimal cat2HoursPerDay = (cat2UsableDays > 0) ? ((cat2Pct/100) * input.numberOfHours) / cat2UsableDays : 0;
+            Decimal cat3HoursPerDay = (cat3UsableDays > 0) ? ((cat3Pct/100) * input.numberOfHours) / cat3UsableDays : 0;
+            Decimal postHoursPerDay = (postUsableDays > 0) ? ((postPct/100) * input.numberOfHours) / postUsableDays : 0;
+
+            // Debug logs for diagnosis
+            System.debug('CAT1: start=' + cat1ActualStart + ', end=' + cat1ActualEnd + ', usableDays=' + cat1UsableDays + ', pct=' + cat1Pct + ', hoursPerDay=' + cat1HoursPerDay);
+            System.debug('CAT2: start=' + cat2ActualStart + ', end=' + cat2ActualEnd + ', usableDays=' + cat2UsableDays + ', pct=' + cat2Pct + ', hoursPerDay=' + cat2HoursPerDay);
+            System.debug('CAT3: start=' + cat3ActualStart + ', end=' + cat3ActualEnd + ', usableDays=' + cat3UsableDays + ', pct=' + cat3Pct + ', hoursPerDay=' + cat3HoursPerDay);
+            System.debug('POST: start=' + postActualStart + ', end=' + postActualEnd + ', usableDays=' + postUsableDays + ', pct=' + postPct + ', hoursPerDay=' + postHoursPerDay);
+            System.debug('allSplits (holidays+onsiteGap): ' + allSplits);
+
             // Cat1
             if (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd) {
-                ScheduleHoursDistributor.addSplitExceptions(cat1ActualStart, cat1ActualEnd, cat1Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
+                ScheduleHoursDistributor.addSplitExceptions(cat1ActualStart, cat1ActualEnd, cat1HoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
             }
             // Cat2
             if (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd) {
-                ScheduleHoursDistributor.addSplitExceptions(cat2ActualStart, cat2ActualEnd, cat2Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat2'));
+                ScheduleHoursDistributor.addSplitExceptions(cat2ActualStart, cat2ActualEnd, cat2HoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat2'));
             }
             // Cat3
             if (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd) {
-                ScheduleHoursDistributor.addSplitExceptions(cat3ActualStart, cat3ActualEnd, cat3Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat3'));
+                ScheduleHoursDistributor.addSplitExceptions(cat3ActualStart, cat3ActualEnd, cat3HoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat3'));
             }
             // Post
             if (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd) {
-                ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postPct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
+                ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postHoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
             }
 
             outputList.add(new ScheduleExceptionOutputWrapper(
@@ -223,26 +236,20 @@ public with sharing class ScheduleHoursDistributor {
 
     // Helper: Adds split exceptions for a category, splitting at every holiday and onsite gap day
     public static void addSplitExceptions(
-        Date segStart, Date segEnd, Decimal pct, Integer workDays, Id scheduleId, Decimal numberOfHours, Date inputStart, Date inputEnd, Set<Date> allSplits, List<pse__Schedule_Exception__c> allExceptions, List<pse__Schedule_Exception__c> catList
+        Date segStart, Date segEnd, Decimal hoursPerDay, Integer workDays, Id scheduleId, Date inputStart, Date inputEnd, Set<Date> allSplits, List<pse__Schedule_Exception__c> allExceptions, List<pse__Schedule_Exception__c> catList
     ) {
         Date currStart = null;
-        Integer usableDays = 0;
         for (Date d = segStart; d <= segEnd.addDays(1); d = d.addDays(1)) {
             Boolean isSplit = (d > segEnd) || allSplits.contains(d);
             if (currStart == null && !allSplits.contains(d) && d >= inputStart && d <= inputEnd) {
                 currStart = d;
-                usableDays = 1;
             } else if (currStart != null && !isSplit && d >= inputStart && d <= inputEnd) {
-                usableDays++;
+                // continue current segment
             } else if (currStart != null && isSplit) {
-                Decimal hoursPerDay = (usableDays > 0) ? ((pct/100) * numberOfHours) / usableDays : 0;
-                if (usableDays > 0) {
-                    pse__Schedule_Exception__c exc = createScheduleException(scheduleId, currStart, d.addDays(-1), workDays, hoursPerDay);
-                    allExceptions.add(exc);
-                    catList.add(exc);
-                }
+                pse__Schedule_Exception__c exc = createScheduleException(scheduleId, currStart, d.addDays(-1), workDays, hoursPerDay);
+                allExceptions.add(exc);
+                catList.add(exc);
                 currStart = null;
-                usableDays = 0;
             }
         }
     }
@@ -251,16 +258,20 @@ public with sharing class ScheduleHoursDistributor {
     public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates) {
         Integer count = 0;
         for (Date d = start; d <= endDate; d = d.addDays(1)) {
-            if (isWeekday(d) && !excludeDates.contains(d)) {
+            Boolean weekday = isWeekday(d);
+            Boolean excluded = excludeDates.contains(d);
+            if (weekday && !excluded) {
                 count++;
             }
+            System.debug('countUsableWorkdays: date=' + d + ', isWeekday=' + weekday + ', isExcluded=' + excluded + ', runningCount=' + count);
         }
+        System.debug('countUsableWorkdays: FINAL count for range ' + start + ' to ' + endDate + ' (excludes=' + excludeDates + ') = ' + count);
         return count;
     }
 
     // Helper: Returns true if the date is a weekday (Mon-Fri)
     public static Boolean isWeekday(Date d) {
-        Integer dow = Math.mod(d.daysBetween(Date.newInstance(1900, 1, 7)), 7);
+        Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Monday, 7=Sunday
         return dow >= 1 && dow <= 5;
     }
 
