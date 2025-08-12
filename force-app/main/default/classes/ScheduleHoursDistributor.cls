@@ -164,9 +164,6 @@ public with sharing class ScheduleHoursDistributor {
                 ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postPct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
             }
 
-
-
-
             outputList.add(new ScheduleExceptionOutputWrapper(
                 allExceptions,
                 null
