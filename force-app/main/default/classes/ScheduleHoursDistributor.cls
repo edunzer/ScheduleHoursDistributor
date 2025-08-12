@@ -147,6 +147,16 @@ public with sharing class ScheduleHoursDistributor {
                 'post' => new List<pse__Schedule_Exception__c>()
             };
 
+            // Calculate usable workdays for each category
+            Integer cat1UsableDays = (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd)
+                ? countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits) : 0;
+            Integer cat2UsableDays = (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd)
+                ? countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits) : 0;
+            Integer cat3UsableDays = (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd)
+                ? countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits) : 0;
+            Integer postUsableDays = (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd)
+                ? countUsableWorkdays(postActualStart, postActualEnd, allSplits) : 0;
+
             // Cat1
             if (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd) {
                 ScheduleHoursDistributor.addSplitExceptions(cat1ActualStart, cat1ActualEnd, cat1Pct, input.numberOfWorkDays, input.scheduleId, input.numberOfHours, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
