@@ -237,6 +237,23 @@ public with sharing class ScheduleHoursDistributor {
         }
     }
 
+    // Helper: Counts usable workdays (Mon-Fri) between two dates, excluding holidays and onsite gap days
+    public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates) {
+        Integer count = 0;
+        for (Date d = start; d <= endDate; d = d.addDays(1)) {
+            if (isWeekday(d) && !excludeDates.contains(d)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    // Helper: Returns true if the date is a weekday (Mon-Fri)
+    public static Boolean isWeekday(Date d) {
+        Integer dow = Math.mod(d.daysBetween(Date.newInstance(1900, 1, 7)), 7);
+        return dow >= 1 && dow <= 5;
+    }
+
 
     // Wrapper class: Holds output schedule exceptions and calculated values
     public class ScheduleExceptionOutputWrapper {
