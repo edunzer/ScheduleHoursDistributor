@@ -340,35 +340,87 @@ public class ScheduleHoursDistributorTest {
         System.assertEquals(null, result[0].errorMessage, 'Should be no error');
         System.assert(result[0].scheduleExceptions.size() > 0, 'Should generate exceptions');
 
-        // There are 3 valid categories; original sum = 30, diff = 70, addEach = 70/3 -> expected per-category pct = 10 + 70/3 = 33.333...
+        // There are 3 valid categories; original sum = 30, diff = 70, addEach = 70/3 -> unrounded per-category pct
         Decimal sumOrig = input.cat1Percentage + input.cat2Percentage + input.cat3Percentage;
         Decimal diff = 100 - sumOrig;
         Integer validCount = 3;
         Decimal addEach = diff / validCount;
-        Decimal expectedCatPct = input.cat1Percentage + addEach; // same for each cat in this test
 
-        // Each category covers 1 week (7 days) trimmed to weekdays -> usable days should be 5 each
+        // Reproduce the rounding applied by the implementation (decimals=2, residualStrategy='LAST')
+        Integer decimals = 2;
+        Integer scale = 1;
+        for (Integer i = 0; i < decimals; i++) scale *= 10;
+        List<Decimal> unroundedList = new List<Decimal>{ input.cat1Percentage + addEach, input.cat2Percentage + addEach, input.cat3Percentage + addEach };
+        List<Integer> scaledInts = new List<Integer>();
+        Integer sumScaled = 0;
+        for (Decimal v : unroundedList) {
+            Decimal scaled = v * scale;
+            Decimal rounded = scaled.setScale(0, System.RoundingMode.HALF_UP);
+            Integer asInt = Integer.valueOf(rounded.intValue());
+            scaledInts.add(asInt);
+            sumScaled += asInt;
+        }
+        Integer desiredTotal = 100 * scale;
+        Integer residual = desiredTotal - sumScaled;
+        // apply residual to last
+        if (residual != 0) scaledInts[scaledInts.size()-1] = scaledInts[scaledInts.size()-1] + residual;
+
+        // compute expected per-category hours-per-day using rounded percentages
+        List<Decimal> expectedHoursPerDayList = new List<Decimal>();
         Integer expectedUsable = 5;
-        // Expected hours per day per category = ((expectedPct/100) * totalHours) / usableDays
-        Decimal expectedHoursPerDay = ((expectedCatPct / 100) * input.numberOfHours) / expectedUsable;
+        for (Integer si : scaledInts) {
+            Decimal pct = Decimal.valueOf(si) / Decimal.valueOf(scale);
+            Decimal hoursPerDay = ((pct / 100) * input.numberOfHours) / expectedUsable;
+            expectedHoursPerDayList.add(hoursPerDay.setScale(5, System.RoundingMode.HALF_UP));
+        }
 
         // Expected total hours should equal input.numberOfHours
         Decimal expectedTotal = input.numberOfHours;
 
-        // Compute actual total from generated exceptions and assert weekday hour values equal expectedHoursPerDay
+        // Compute actual total from generated exceptions and assert weekday hour values match one of expected rounded per-day values
         Decimal actualTotal = Decimal.valueOf('0');
         for (pse__Schedule_Exception__c ex : result[0].scheduleExceptions) {
             Date s = ex.pse__Date__c;
             Date e = ex.pse__End_Date__c == null ? ex.pse__Date__c : ex.pse__End_Date__c;
             for (Date d = s; d <= e; d = d.addDays(1)) {
                 Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Mon..7=Sun
-                if (dow == 1) { actualTotal += ex.pse__Monday_Hours__c == null ? 0 : ex.pse__Monday_Hours__c; if (ex.pse__Monday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Monday_Hours__c.setScale(5)); }
-                if (dow == 2) { actualTotal += ex.pse__Tuesday_Hours__c == null ? 0 : ex.pse__Tuesday_Hours__c; if (ex.pse__Tuesday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Tuesday_Hours__c.setScale(5)); }
-                if (dow == 3) { actualTotal += ex.pse__Wednesday_Hours__c == null ? 0 : ex.pse__Wednesday_Hours__c; if (ex.pse__Wednesday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Wednesday_Hours__c.setScale(5)); }
-                if (dow == 4) { actualTotal += ex.pse__Thursday_Hours__c == null ? 0 : ex.pse__Thursday_Hours__c; if (ex.pse__Thursday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Thursday_Hours__c.setScale(5)); }
-                if (dow == 5) { actualTotal += ex.pse__Friday_Hours__c == null ? 0 : ex.pse__Friday_Hours__c; if (ex.pse__Friday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Friday_Hours__c.setScale(5)); }
-                if (dow == 6) { actualTotal += ex.pse__Saturday_Hours__c == null ? 0 : ex.pse__Saturday_Hours__c; }
-                if (dow == 7) { actualTotal += ex.pse__Sunday_Hours__c == null ? 0 : ex.pse__Sunday_Hours__c; }
+                if (dow == 1) {
+                    Decimal v = ex.pse__Monday_Hours__c == null ? 0 : ex.pse__Monday_Hours__c;
+                    actualTotal += v;
+                    Boolean matched = false;
+                    for (Decimal expect : expectedHoursPerDayList) if (v.setScale(5, System.RoundingMode.HALF_UP) == expect) matched = true;
+                    System.assertEquals(true, matched, 'Monday hours should match one of the expected rounded per-day values');
+                }
+                if (dow == 2) {
+                    Decimal v = ex.pse__Tuesday_Hours__c == null ? 0 : ex.pse__Tuesday_Hours__c;
+                    actualTotal += v;
+                    Boolean matched = false;
+                    for (Decimal expect : expectedHoursPerDayList) if (v.setScale(5, System.RoundingMode.HALF_UP) == expect) matched = true;
+                    System.assertEquals(true, matched, 'Tuesday hours should match one of the expected rounded per-day values');
+                }
+                if (dow == 3) {
+                    Decimal v = ex.pse__Wednesday_Hours__c == null ? 0 : ex.pse__Wednesday_Hours__c;
+                    actualTotal += v;
+                    Boolean matched = false;
+                    for (Decimal expect : expectedHoursPerDayList) if (v.setScale(5, System.RoundingMode.HALF_UP) == expect) matched = true;
+                    System.assertEquals(true, matched, 'Wednesday hours should match one of the expected rounded per-day values');
+                }
+                if (dow == 4) {
+                    Decimal v = ex.pse__Thursday_Hours__c == null ? 0 : ex.pse__Thursday_Hours__c;
+                    actualTotal += v;
+                    Boolean matched = false;
+                    for (Decimal expect : expectedHoursPerDayList) if (v.setScale(5, System.RoundingMode.HALF_UP) == expect) matched = true;
+                    System.assertEquals(true, matched, 'Thursday hours should match one of the expected rounded per-day values');
+                }
+                if (dow == 5) {
+                    Decimal v = ex.pse__Friday_Hours__c == null ? 0 : ex.pse__Friday_Hours__c;
+                    actualTotal += v;
+                    Boolean matched = false;
+                    for (Decimal expect : expectedHoursPerDayList) if (v.setScale(5, System.RoundingMode.HALF_UP) == expect) matched = true;
+                    System.assertEquals(true, matched, 'Friday hours should match one of the expected rounded per-day values');
+                }
+                if (dow == 6) actualTotal += ex.pse__Saturday_Hours__c == null ? 0 : ex.pse__Saturday_Hours__c;
+                if (dow == 7) actualTotal += ex.pse__Sunday_Hours__c == null ? 0 : ex.pse__Sunday_Hours__c;
             }
         }
 
