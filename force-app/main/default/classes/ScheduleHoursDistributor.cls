@@ -100,6 +100,7 @@ public with sharing class ScheduleHoursDistributor {
             Date postActualEnd = postValid ? (postEnd < input.endDate ? postEnd : input.endDate) : null;
 
             // 5. Redistribute percentages: sum valid, get diff from 100, add even split of diff to each valid
+            // Rounding is controlled by optional input.roundingDecimals and input.residualStrategy
             Decimal cat1Pct = 0, cat2Pct = 0, cat3Pct = 0, postPct = 0;
             List<Decimal> origPcts = new List<Decimal>();
             List<String> validCats = new List<String>();
@@ -112,14 +113,27 @@ public with sharing class ScheduleHoursDistributor {
             for (Decimal pct : origPcts) sumValid += pct;
             Decimal diff = 100 - sumValid;
             Decimal addEach = validCount > 0 ? diff / validCount : 0;
-            Integer idx = 0;
-            for (String cat : validCats) {
-                Decimal pct = origPcts[idx] + addEach;
+
+            // Build list of unrounded redistributed percentages
+            List<Decimal> unroundedList = new List<Decimal>();
+            for (Integer i = 0; i < validCount; i++) {
+                unroundedList.add(origPcts[i] + addEach);
+            }
+
+            // Determine rounding behavior (defaults to 2 decimals and LAST residual strategy)
+            Integer decimals = (input.roundingDecimals == null) ? 2 : input.roundingDecimals;
+            String strategy = (input.residualStrategy == null) ? 'LAST' : input.residualStrategy;
+
+            List<Decimal> newPcts = scaleAndRoundPercentages(unroundedList, decimals, strategy);
+
+            // Assign back to category pct variables
+            for (Integer i = 0; i < validCount; i++) {
+                String cat = validCats[i];
+                Decimal pct = newPcts[i];
                 if (cat == 'cat1') cat1Pct = pct;
                 if (cat == 'cat2') cat2Pct = pct;
                 if (cat == 'cat3') cat3Pct = pct;
                 if (cat == 'post') postPct = pct;
-                idx++;
             }
 
             // 6. Create exceptions for each valid category, ensuring no overlap and onsite gap is its own exception
@@ -284,6 +298,59 @@ public with sharing class ScheduleHoursDistributor {
         return dow >= 1 && dow <= 5;
     }
 
+    // Helper: scales decimals to integer space, rounds, applies residual, and returns decimal percentages
+    private static List<Decimal> scaleAndRoundPercentages(List<Decimal> values, Integer decimals, String residualStrategy) {
+        List<Decimal> results = new List<Decimal>();
+        if (values == null || values.isEmpty()) return results;
+
+        if (decimals == null) decimals = 2;
+        if (decimals < 0) decimals = 0;
+        if (decimals > 6) decimals = 6; // reasonable upper bound
+
+        Integer scale = 1;
+        for (Integer i = 0; i < decimals; i++) scale *= 10;
+
+        Integer count = values.size();
+        List<Integer> scaledInts = new List<Integer>();
+        Integer sumScaled = 0;
+
+        // Round each value into scaled integer space
+        for (Decimal v : values) {
+            Decimal scaled = (v == null ? 0 : v) * scale;
+            Decimal rounded = scaled.setScale(0, System.RoundingMode.HALF_UP);
+            Integer asInt = Integer.valueOf(rounded.intValue());
+            scaledInts.add(asInt);
+            sumScaled += asInt;
+        }
+
+        Integer desiredTotal = 100 * scale;
+        Integer residual = desiredTotal - sumScaled;
+
+        // If residual exists, apply according to strategy
+        if (residual != 0) {
+            Integer idxToAdjust = count - 1; // default LAST
+            if (residualStrategy != null && residualStrategy.toUpperCase() == 'LARGEST') {
+                Integer maxIdx = 0;
+                Decimal maxVal = values[0] == null ? 0 : values[0];
+                for (Integer i = 1; i < count; i++) {
+                    Decimal cur = values[i] == null ? 0 : values[i];
+                    if (cur > maxVal) { maxVal = cur; maxIdx = i; }
+                }
+                idxToAdjust = maxIdx;
+            }
+            scaledInts[idxToAdjust] = scaledInts[idxToAdjust] + residual;
+        }
+
+        // Convert back to decimals with specified decimal places
+        for (Integer si : scaledInts) {
+            Decimal dec = Decimal.valueOf(si) / Decimal.valueOf(scale);
+            dec = dec.setScale(decimals, System.RoundingMode.HALF_UP);
+            results.add(dec);
+        }
+
+        return results;
+    }
+
 
     // Wrapper class: Holds output schedule exceptions and calculated values
     public class ScheduleExceptionOutputWrapper {
@@ -324,6 +391,12 @@ public with sharing class ScheduleHoursDistributor {
 
         @InvocableVariable(label='Existing Schedule Exceptions') 
         public List<pse__Schedule_Exception__c> existingExceptions;
+
+        // Optional rounding controls (nullable): preserve existing behavior when null
+        // Number of decimal places to round percentages to (default 2)
+        public Integer roundingDecimals;
+        // Where to apply any residual after scaling: 'LAST' (default) or 'LARGEST'
+        public String residualStrategy;
 
         public Date cat1StartDate;
         public Date cat1EndDate;
