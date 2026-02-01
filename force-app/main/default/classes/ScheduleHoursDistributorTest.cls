@@ -19,6 +19,144 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testMultipleInputsProcessing_CurrentBehavior() {
+        // The current implementation processes only the first input in the list.
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input1 = new ScheduleHoursDistributor.ScheduleInput();
+        input1.scheduleId = schedule.Id;
+        input1.startDate = Date.newInstance(2025, 3, 1);
+        input1.endDate = Date.newInstance(2025, 3, 7);
+        input1.numberOfHours = Decimal.valueOf('40');
+        input1.numberOfWorkDays = 5;
+        input1.cat1Weeks = 1; input1.cat2Weeks = 0; input1.cat3Weeks = 0; input1.postWeeks = 0;
+        input1.cat1Percentage = 100; input1.cat2Percentage = 0; input1.cat3Percentage = 0; input1.postPercentage = 0;
+        input1.onsiteStartDate = null; input1.onsiteEndDate = null; input1.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        ScheduleHoursDistributor.ScheduleInput input2 = new ScheduleHoursDistributor.ScheduleInput();
+        input2.scheduleId = schedule.Id;
+        input2.startDate = Date.newInstance(2025, 4, 1);
+        input2.endDate = Date.newInstance(2025, 4, 7);
+        input2.numberOfHours = Decimal.valueOf('35');
+        input2.numberOfWorkDays = 5;
+        input2.cat1Weeks = 1; input2.cat2Weeks = 0; input2.cat3Weeks = 0; input2.postWeeks = 0;
+        input2.cat1Percentage = 100; input2.cat2Percentage = 0; input2.cat3Percentage = 0; input2.postPercentage = 0;
+        input2.onsiteStartDate = null; input2.onsiteEndDate = null; input2.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleInput> inputs = new List<ScheduleHoursDistributor.ScheduleInput>{input1, input2};
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> results = ScheduleHoursDistributor.generateCategoryScheduleExceptions(inputs);
+
+        // Current behavior: only one wrapper (first input) is processed
+        System.assertEquals(1, results.size(), 'Current implementation processes only the first input');
+        System.assertEquals(null, results[0].errorMessage, 'First input should produce no error with these values');
+    }
+
+    @isTest
+    static void testAddSplitExceptions_MultiDaySplit_ConsecutiveSplits() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c LIMIT 1];
+        Date segStart = Date.newInstance(2025,3,1);
+        Date segEnd = Date.newInstance(2025,3,7);
+        Set<Date> splits = new Set<Date>{ Date.newInstance(2025,3,3), Date.newInstance(2025,3,4) };
+
+        List<pse__Schedule_Exception__c> allExceptions = new List<pse__Schedule_Exception__c>();
+        List<pse__Schedule_Exception__c> catList = new List<pse__Schedule_Exception__c>();
+
+        Decimal hoursPerDay = Decimal.valueOf('2');
+
+        ScheduleHoursDistributor.addSplitExceptions(segStart, segEnd, hoursPerDay, 5, schedule.Id, segStart, segEnd, splits, allExceptions, catList);
+
+        // Expect two segments: before the two-day split, and after
+        System.assertEquals(2, catList.size(), 'Consecutive splits should yield two non-split segments');
+        Integer totalRangeDays = segStart.daysBetween(segEnd) + 1;
+        Integer summedDays = 0;
+        for (pse__Schedule_Exception__c ex : catList) {
+            Integer len = ex.pse__Date__c.daysBetween(ex.pse__End_Date__c) + 1;
+            summedDays += len;
+        }
+        System.assertEquals(totalRangeDays - splits.size(), Integer.valueOf(summedDays), 'Summed days should equal total minus split days');
+    }
+
+    @isTest
+    static void testOnsiteGapWeekBoundaries_PresentAsWeekException() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025,3,1);
+        input.endDate = Date.newInstance(2025,3,31);
+        input.numberOfHours = Decimal.valueOf('80');
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 2; input.cat2Weeks = 2; input.cat3Weeks = 2; input.postWeeks = 0;
+        input.cat1Percentage = 33; input.cat2Percentage = 33; input.cat3Percentage = 34; input.postPercentage = 0;
+        // Choose an onsiteStartDate mid-week
+        input.onsiteStartDate = Date.newInstance(2025,3,5);
+        input.onsiteEndDate = Date.newInstance(2025,3,10);
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(1, result.size());
+        System.assertEquals(null, result[0].errorMessage);
+
+        // Compute expected onsite gap week start/end using same logic as implementation
+        Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
+        Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
+        Date onsiteWeekStart = input.onsiteStartDate.addDays(daysToMonday);
+        Date onsiteWeekEnd = onsiteWeekStart.addDays(6);
+
+        Boolean foundOnsiteException = false;
+        for (pse__Schedule_Exception__c ex : result[0].scheduleExceptions) {
+            Date excEnd = ex.pse__End_Date__c == null ? ex.pse__Date__c : ex.pse__End_Date__c;
+            if (ex.pse__Date__c == onsiteWeekStart && excEnd == onsiteWeekEnd) {
+                // Week-level exception should have zero hours for weekdays
+                System.assertEquals(Decimal.valueOf('0'), ex.pse__Monday_Hours__c);
+                System.assertEquals(Decimal.valueOf('0'), ex.pse__Tuesday_Hours__c);
+                System.assertEquals(Decimal.valueOf('0'), ex.pse__Wednesday_Hours__c);
+                System.assertEquals(Decimal.valueOf('0'), ex.pse__Thursday_Hours__c);
+                System.assertEquals(Decimal.valueOf('0'), ex.pse__Friday_Hours__c);
+                foundOnsiteException = true;
+            }
+        }
+        System.assertEquals(true, foundOnsiteException, 'Onsite week exception covering the gap should be present');
+    }
+
+    @isTest
+    static void testPercentageSumOver100_NormalizesAndTotalsCorrectly() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025,3,1);
+        input.endDate = Date.newInstance(2025,3,21);
+        input.numberOfHours = Decimal.valueOf('90');
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 1; input.cat2Weeks = 1; input.cat3Weeks = 1; input.postWeeks = 0;
+        // Sum > 100
+        input.cat1Percentage = 50; input.cat2Percentage = 50; input.cat3Percentage = 50; input.postPercentage = 0;
+        input.onsiteStartDate = null; input.onsiteEndDate = null; input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(1, result.size());
+        System.assertEquals(null, result[0].errorMessage);
+
+        // Sum actual hours from exceptions should equal numberOfHours
+        Decimal actualTotal = Decimal.valueOf('0');
+        for (pse__Schedule_Exception__c ex : result[0].scheduleExceptions) {
+            Date s = ex.pse__Date__c;
+            Date e = ex.pse__End_Date__c == null ? ex.pse__Date__c : ex.pse__End_Date__c;
+            for (Date d = s; d <= e; d = d.addDays(1)) {
+                Integer dow = d.toStartOfWeek().daysBetween(d) + 1;
+                if (dow == 1) actualTotal += ex.pse__Monday_Hours__c == null ? 0 : ex.pse__Monday_Hours__c;
+                if (dow == 2) actualTotal += ex.pse__Tuesday_Hours__c == null ? 0 : ex.pse__Tuesday_Hours__c;
+                if (dow == 3) actualTotal += ex.pse__Wednesday_Hours__c == null ? 0 : ex.pse__Wednesday_Hours__c;
+                if (dow == 4) actualTotal += ex.pse__Thursday_Hours__c == null ? 0 : ex.pse__Thursday_Hours__c;
+                if (dow == 5) actualTotal += ex.pse__Friday_Hours__c == null ? 0 : ex.pse__Friday_Hours__c;
+            }
+        }
+
+        System.assertEquals(input.numberOfHours.setScale(5), actualTotal.setScale(5), 'Total hours after normalization should equal input');
+    }
+
+    @isTest
     static void testMathFunctions() {
         // Retrieve the created Schedule
         pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c FROM pse__Schedule__c LIMIT 1];
