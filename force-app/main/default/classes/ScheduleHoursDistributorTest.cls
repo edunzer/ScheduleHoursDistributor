@@ -83,4 +83,85 @@ public class ScheduleHoursDistributorTest {
         System.assertNotEquals(null, result[0].errorMessage, 'An error message should be present');
         System.assertEquals('Error: Schedule ID cannot be null.', result[0].errorMessage, 'Error message should match expected output');
     }
+
+    @isTest
+    static void testGenerateScheduleExceptionsWithExistingExceptions() {
+        // Retrieve the created Schedule
+        pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c LIMIT 1];
+
+        // Create input
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = schedule.pse__Start_Date__c;
+        input.endDate = schedule.pse__End_Date__c;
+        input.numberOfHours = schedule.pse__Scheduled_Hours__c;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 11;
+        input.cat2Weeks = 8;
+        input.cat3Weeks = 6;
+        input.postWeeks = 4;
+        input.cat1Percentage = 25;
+        input.cat2Percentage = 30;
+        input.cat3Percentage = 40;
+        input.postPercentage = 5;
+        // Onsite dates
+        input.onsiteStartDate = Date.newInstance(2025, 3, 1);
+        input.onsiteEndDate = Date.newInstance(2025, 3, 14);
+
+        // Provide existing exceptions (holidays) - these are not inserted, just supplied to the method
+        List<pse__Schedule_Exception__c> holidays = new List<pse__Schedule_Exception__c>();
+        // Pick a few dates within the schedule range to act as holidays
+        holidays.add(new pse__Schedule_Exception__c(
+            pse__Date__c = Date.newInstance(2025, 3, 3),
+            pse__End_Date__c = Date.newInstance(2025, 3, 3),
+            pse__Monday_Hours__c = 0,
+            pse__Tuesday_Hours__c = 0,
+            pse__Wednesday_Hours__c = 0,
+            pse__Thursday_Hours__c = 0,
+            pse__Friday_Hours__c = 0,
+            pse__Saturday_Hours__c = 0,
+            pse__Sunday_Hours__c = 0
+        ));
+        holidays.add(new pse__Schedule_Exception__c(
+            pse__Date__c = Date.newInstance(2025, 4, 15),
+            pse__End_Date__c = Date.newInstance(2025, 4, 15),
+            pse__Monday_Hours__c = 0,
+            pse__Tuesday_Hours__c = 0,
+            pse__Wednesday_Hours__c = 0,
+            pse__Thursday_Hours__c = 0,
+            pse__Friday_Hours__c = 0,
+            pse__Saturday_Hours__c = 0,
+            pse__Sunday_Hours__c = 0
+        ));
+        holidays.add(new pse__Schedule_Exception__c(
+            pse__Date__c = Date.newInstance(2025, 5, 5),
+            pse__End_Date__c = Date.newInstance(2025, 5, 5),
+            pse__Monday_Hours__c = 0,
+            pse__Tuesday_Hours__c = 0,
+            pse__Wednesday_Hours__c = 0,
+            pse__Thursday_Hours__c = 0,
+            pse__Friday_Hours__c = 0,
+            pse__Saturday_Hours__c = 0,
+            pse__Sunday_Hours__c = 0
+        ));
+        input.existingExceptions = holidays;
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+
+        // Basic assertions
+        System.assertNotEquals(null, result, 'Result should not be null');
+        System.assertEquals(1, result.size(), 'Only one result should be returned');
+        System.assert(result[0].scheduleExceptions.size() > 0, 'Schedule exceptions should be generated');
+        System.assertEquals(null, result[0].errorMessage, 'There should be no error messages');
+
+        // Ensure none of the generated exceptions covers a holiday date
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            for (pse__Schedule_Exception__c hol : holidays) {
+                // If exception has an end date, check range; otherwise check start only
+                Date excEnd = exc.pse__End_Date__c == null ? exc.pse__Date__c : exc.pse__End_Date__c;
+                Boolean covers = (exc.pse__Date__c <= hol.pse__Date__c && hol.pse__Date__c <= excEnd);
+                System.assertEquals(false, covers, 'Generated exception should not cover holiday ' + hol.pse__Date__c);
+            }
+        }
+    }
 }
