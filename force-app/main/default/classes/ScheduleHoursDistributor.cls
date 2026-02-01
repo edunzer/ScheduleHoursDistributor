@@ -100,6 +100,7 @@ public with sharing class ScheduleHoursDistributor {
             Date postActualEnd = postValid ? (postEnd < input.endDate ? postEnd : input.endDate) : null;
 
             // 5. Redistribute percentages: sum valid, get diff from 100, add even split of diff to each valid
+            // Apply fixed 2-decimal rounding and assign any remainder to the last valid category to preserve totals
             Decimal cat1Pct = 0, cat2Pct = 0, cat3Pct = 0, postPct = 0;
             List<Decimal> origPcts = new List<Decimal>();
             List<String> validCats = new List<String>();
@@ -112,14 +113,30 @@ public with sharing class ScheduleHoursDistributor {
             for (Decimal pct : origPcts) sumValid += pct;
             Decimal diff = 100 - sumValid;
             Decimal addEach = validCount > 0 ? diff / validCount : 0;
-            Integer idx = 0;
-            for (String cat : validCats) {
-                Decimal pct = origPcts[idx] + addEach;
+
+            // Build new percentages with 2-decimal rounding; keep remainder for last category
+            List<Decimal> newPcts = new List<Decimal>();
+            for (Integer i = 0; i < validCount; i++) {
+                Decimal unrounded = origPcts[i] + addEach;
+                if (i < validCount - 1) {
+                    newPcts.add(unrounded.setScale(2, System.RoundingMode.HALF_UP));
+                } else {
+                    // Assign remainder to last category so totals equal exactly 100.00
+                    Decimal sumSoFar = 0;
+                    for (Decimal d : newPcts) sumSoFar += d;
+                    Decimal last = 100 - sumSoFar;
+                    newPcts.add(last.setScale(2, System.RoundingMode.HALF_UP));
+                }
+            }
+
+            // Assign back to category pct variables
+            for (Integer i = 0; i < validCount; i++) {
+                String cat = validCats[i];
+                Decimal pct = newPcts[i];
                 if (cat == 'cat1') cat1Pct = pct;
                 if (cat == 'cat2') cat2Pct = pct;
                 if (cat == 'cat3') cat3Pct = pct;
                 if (cat == 'post') postPct = pct;
-                idx++;
             }
 
             // 6. Create exceptions for each valid category, ensuring no overlap and onsite gap is its own exception
