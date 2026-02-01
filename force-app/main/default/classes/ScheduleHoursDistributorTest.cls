@@ -84,6 +84,97 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testComputeValuesOnly() {
+        // Controlled input where categories are 1 week each and no onsite/post, no holidays
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 3, 1);
+        input.endDate = Date.newInstance(2025, 3, 21);
+        input.numberOfHours = Decimal.valueOf('90');
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 1;
+        input.cat2Weeks = 1;
+        input.cat3Weeks = 1;
+        input.postWeeks = 0;
+        input.cat1Percentage = 30;
+        input.cat2Percentage = 30;
+        input.cat3Percentage = 40;
+        input.postPercentage = 0;
+        input.onsiteStartDate = null;
+        input.onsiteEndDate = null;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        // Call the method under test
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(null, result[0].errorMessage, 'Should be no error');
+
+        // Reproduce the internal calculations to derive expected values
+        Integer cat1Days = Integer.valueOf(input.cat1Weeks * 7);
+        Integer cat2Days = Integer.valueOf(input.cat2Weeks * 7);
+        Integer cat3Days = Integer.valueOf(input.cat3Weeks * 7);
+
+        Date cat3End = input.endDate;
+        Date cat3Start = cat3End.addDays(-cat3Days + 1);
+        Date cat2End = cat3Start.addDays(-1);
+        Date cat2Start = cat2End.addDays(-cat2Days + 1);
+        Date cat1End = cat2Start.addDays(-1);
+        Date cat1Start = cat1End.addDays(-cat1Days + 1);
+
+        // Trim to input range (not needed here but kept for parity)
+        Date cat1ActualStart = cat1Start > input.startDate ? cat1Start : input.startDate;
+        Date cat1ActualEnd = cat1End < input.endDate ? cat1End : input.endDate;
+        Date cat2ActualStart = cat2Start > input.startDate ? cat2Start : input.startDate;
+        Date cat2ActualEnd = cat2End < input.endDate ? cat2End : input.endDate;
+        Date cat3ActualStart = cat3Start > input.startDate ? cat3Start : input.startDate;
+        Date cat3ActualEnd = cat3End < input.endDate ? cat3End : input.endDate;
+
+        // No splits/holidays
+        Set<Date> allSplits = new Set<Date>();
+
+        Integer cat1Usable = ScheduleHoursDistributor.countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits);
+        Integer cat2Usable = ScheduleHoursDistributor.countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits);
+        Integer cat3Usable = ScheduleHoursDistributor.countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits);
+
+        System.assertEquals(5, Integer.valueOf(cat1Usable), 'Cat1 usable days should be 5');
+        System.assertEquals(5, Integer.valueOf(cat2Usable), 'Cat2 usable days should be 5');
+        System.assertEquals(5, Integer.valueOf(cat3Usable), 'Cat3 usable days should be 5');
+
+        // Percentages sum to 100, so hours per category are straightforward
+        Decimal cat1Pct = input.cat1Percentage;
+        Decimal cat2Pct = input.cat2Percentage;
+        Decimal cat3Pct = input.cat3Percentage;
+
+        Decimal cat1HoursPerDay = (cat1Usable > 0) ? ((cat1Pct/100) * input.numberOfHours) / cat1Usable : 0;
+        Decimal cat2HoursPerDay = (cat2Usable > 0) ? ((cat2Pct/100) * input.numberOfHours) / cat2Usable : 0;
+        Decimal cat3HoursPerDay = (cat3Usable > 0) ? ((cat3Pct/100) * input.numberOfHours) / cat3Usable : 0;
+
+        // Expected totals
+        Decimal expectedTotal = (cat1HoursPerDay * cat1Usable) + (cat2HoursPerDay * cat2Usable) + (cat3HoursPerDay * cat3Usable);
+        System.assertEquals(input.numberOfHours, expectedTotal, 'Expected total hours should equal input numberOfHours');
+
+        // Now compute actual total from generated exceptions by summing per-day fields across date ranges
+        Decimal actualTotal = Decimal.valueOf('0');
+        for (pse__Schedule_Exception__c ex : result[0].scheduleExceptions) {
+            Date s = ex.pse__Date__c;
+            Date e = ex.pse__End_Date__c == null ? ex.pse__Date__c : ex.pse__End_Date__c;
+            for (Date d = s; d <= e; d = d.addDays(1)) {
+                Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Mon
+                if (dow == 1) actualTotal += ex.pse__Monday_Hours__c == null ? 0 : ex.pse__Monday_Hours__c;
+                if (dow == 2) actualTotal += ex.pse__Tuesday_Hours__c == null ? 0 : ex.pse__Tuesday_Hours__c;
+                if (dow == 3) actualTotal += ex.pse__Wednesday_Hours__c == null ? 0 : ex.pse__Wednesday_Hours__c;
+                if (dow == 4) actualTotal += ex.pse__Thursday_Hours__c == null ? 0 : ex.pse__Thursday_Hours__c;
+                if (dow == 5) actualTotal += ex.pse__Friday_Hours__c == null ? 0 : ex.pse__Friday_Hours__c;
+                if (dow == 6) actualTotal += ex.pse__Saturday_Hours__c == null ? 0 : ex.pse__Saturday_Hours__c;
+                if (dow == 7) actualTotal += ex.pse__Sunday_Hours__c == null ? 0 : ex.pse__Sunday_Hours__c;
+            }
+        }
+
+        System.assertEquals(expectedTotal.setScale(5), actualTotal.setScale(5), 'Computed total hours should match actual hours in exceptions');
+    }
+
+    @isTest
     static void testGenerateScheduleExceptions() {
         // Retrieve the created Schedule
         pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c LIMIT 1];
