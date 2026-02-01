@@ -264,9 +264,10 @@ public with sharing class ScheduleHoursDistributor {
         Date currStart = null;
         for (Date d = segStart; d <= segEnd.addDays(1); d = d.addDays(1)) {
             Boolean isSplit = (d > segEnd) || allSplits.contains(d);
-            if (currStart == null && !allSplits.contains(d) && d >= inputStart && d <= inputEnd) {
+            // Use the segment bounds when deciding whether to start/continue a segment.
+            if (currStart == null && !allSplits.contains(d) && d >= segStart && d <= segEnd) {
                 currStart = d;
-            } else if (currStart != null && !isSplit && d >= inputStart && d <= inputEnd) {
+            } else if (currStart != null && !isSplit && d >= segStart && d <= segEnd) {
                 // continue current segment
             } else if (currStart != null && isSplit) {
                 pse__Schedule_Exception__c exc = createScheduleException(scheduleId, currStart, d.addDays(-1), workDays, hoursPerDay);
