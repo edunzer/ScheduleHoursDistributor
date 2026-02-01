@@ -239,6 +239,61 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testMultiDayExistingExceptions() {
+        // Retrieve the created Schedule
+        pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c FROM pse__Schedule__c LIMIT 1];
+
+        // Create input
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 3, 1);
+        input.endDate = Date.newInstance(2025, 3, 31);
+        input.numberOfHours = 160;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 2;
+        input.cat2Weeks = 2;
+        input.cat3Weeks = 2;
+        input.postWeeks = 0;
+        input.cat1Percentage = 33;
+        input.cat2Percentage = 33;
+        input.cat3Percentage = 34;
+        input.postPercentage = 0;
+        input.onsiteStartDate = null;
+        input.onsiteEndDate = null;
+
+        // Create a multi-day existing exception spanning 3/10 to 3/12 (inclusive)
+        List<pse__Schedule_Exception__c> multi = new List<pse__Schedule_Exception__c>();
+        multi.add(new pse__Schedule_Exception__c(
+            pse__Date__c = Date.newInstance(2025, 3, 10),
+            pse__End_Date__c = Date.newInstance(2025, 3, 12),
+            pse__Monday_Hours__c = 0,
+            pse__Tuesday_Hours__c = 0,
+            pse__Wednesday_Hours__c = 0,
+            pse__Thursday_Hours__c = 0,
+            pse__Friday_Hours__c = 0,
+            pse__Saturday_Hours__c = 0,
+            pse__Sunday_Hours__c = 0
+        ));
+        input.existingExceptions = multi;
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+
+        System.assertEquals(null, result[0].errorMessage, 'No error expected');
+        System.assert(result[0].scheduleExceptions.size() > 0, 'Exceptions should be generated');
+
+        // Ensure none of the generated exceptions covers any date from 2025-03-10..2025-03-12
+        Set<Date> forbidden = new Set<Date>();
+        for (Date d = Date.newInstance(2025,3,10); d <= Date.newInstance(2025,3,12); d = d.addDays(1)) forbidden.add(d);
+
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            Date excEnd = exc.pse__End_Date__c == null ? exc.pse__Date__c : exc.pse__End_Date__c;
+            for (Date d = exc.pse__Date__c; d <= excEnd; d = d.addDays(1)) {
+                System.assertEquals(false, forbidden.contains(d), 'Generated exception should not cover multi-day holiday date: ' + d);
+            }
+        }
+    }
+
+    @isTest
     static void testGenerateScheduleExceptions() {
         // Retrieve the created Schedule
         pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c LIMIT 1];
