@@ -4,9 +4,10 @@ public class ScheduleHoursDistributorTest {
     static void setupTestData() {
         // Create a Schedule record
         pse__Schedule__c schedule = new pse__Schedule__c(
-            pse__Start_Date__c = Date.newInstance(2025, 1, 1),
-            pse__End_Date__c = Date.newInstance(2025, 7, 1),
-            pse__Scheduled_Hours__c = 200,
+            // align test schedule with requested scenario
+            pse__Start_Date__c = Date.newInstance(2025, 6, 9),
+            pse__End_Date__c = Date.newInstance(2025, 12, 23),
+            pse__Scheduled_Hours__c = 150,
             pse__Monday_Hours__c = 8,
             pse__Tuesday_Hours__c = 8,
             pse__Wednesday_Hours__c = 8,
@@ -628,5 +629,68 @@ public class ScheduleHoursDistributorTest {
                 System.assertEquals(false, covers, 'Generated exception should not cover holiday ' + hol.pse__Date__c);
             }
         }
+    }
+
+    @isTest
+    static void testTotalHoursWithExistingExceptions() {
+        // Verify total hours still equal input numberOfHours when existing exceptions (holidays) are provided
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c LIMIT 1];
+        // Build input using provided scenario values
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 6, 9);
+        input.endDate = Date.newInstance(2025, 12, 23);
+        input.numberOfHours = Decimal.valueOf('150.00');
+        input.numberOfWorkDays = 5;
+        // Percentages and weeks per provided model
+        input.cat1Percentage = 17; input.cat1Weeks = 10;
+        input.cat2Percentage = 25; input.cat2Weeks = 4;
+        input.cat3Percentage = 50; input.cat3Weeks = 6;
+        input.postPercentage = 8; input.postWeeks = 6;
+        // Onsite window
+        input.onsiteStartDate = Date.newInstance(2025, 10, 6);
+        input.onsiteEndDate = Date.newInstance(2025, 10, 24);
+
+        // Provide existing exceptions (holidays) per given JSON dates
+        List<pse__Schedule_Exception__c> holidays = new List<pse__Schedule_Exception__c>();
+        holidays.add(new pse__Schedule_Exception__c(
+            pse__Date__c = Date.newInstance(2025, 6, 12), pse__End_Date__c = Date.newInstance(2025,6,12), pse__Schedule__c = schedule.Id,
+            pse__Monday_Hours__c = 0, pse__Tuesday_Hours__c = 0, pse__Wednesday_Hours__c = 0, pse__Thursday_Hours__c = 0, pse__Friday_Hours__c = 0,
+            pse__Saturday_Hours__c = 0, pse__Sunday_Hours__c = 0
+        ));
+        holidays.add(new pse__Schedule_Exception__c(
+            pse__Date__c = Date.newInstance(2025, 6, 13), pse__End_Date__c = Date.newInstance(2025,6,13), pse__Schedule__c = schedule.Id,
+            pse__Monday_Hours__c = 0, pse__Tuesday_Hours__c = 0, pse__Wednesday_Hours__c = 0, pse__Thursday_Hours__c = 0, pse__Friday_Hours__c = 0,
+            pse__Saturday_Hours__c = 0, pse__Sunday_Hours__c = 0
+        ));
+        holidays.add(new pse__Schedule_Exception__c(
+            pse__Date__c = Date.newInstance(2025, 7, 21), pse__End_Date__c = Date.newInstance(2025,7,21), pse__Schedule__c = schedule.Id,
+            pse__Monday_Hours__c = 0, pse__Tuesday_Hours__c = 0, pse__Wednesday_Hours__c = 0, pse__Thursday_Hours__c = 0, pse__Friday_Hours__c = 0,
+            pse__Saturday_Hours__c = 0, pse__Sunday_Hours__c = 0
+        ));
+        input.existingExceptions = holidays;
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(1, result.size());
+        System.assertEquals(null, result[0].errorMessage);
+
+        // Sum hours across generated exceptions and assert equals input.numberOfHours
+        Decimal actualTotal = Decimal.valueOf('0');
+        for (pse__Schedule_Exception__c ex : result[0].scheduleExceptions) {
+            Date s = ex.pse__Date__c;
+            Date e = ex.pse__End_Date__c == null ? ex.pse__Date__c : ex.pse__End_Date__c;
+            for (Date d = s; d <= e; d = d.addDays(1)) {
+                Integer dow = d.toStartOfWeek().daysBetween(d) + 1;
+                if (dow == 1) actualTotal += ex.pse__Monday_Hours__c == null ? 0 : ex.pse__Monday_Hours__c;
+                if (dow == 2) actualTotal += ex.pse__Tuesday_Hours__c == null ? 0 : ex.pse__Tuesday_Hours__c;
+                if (dow == 3) actualTotal += ex.pse__Wednesday_Hours__c == null ? 0 : ex.pse__Wednesday_Hours__c;
+                if (dow == 4) actualTotal += ex.pse__Thursday_Hours__c == null ? 0 : ex.pse__Thursday_Hours__c;
+                if (dow == 5) actualTotal += ex.pse__Friday_Hours__c == null ? 0 : ex.pse__Friday_Hours__c;
+                if (dow == 6) actualTotal += ex.pse__Saturday_Hours__c == null ? 0 : ex.pse__Saturday_Hours__c;
+                if (dow == 7) actualTotal += ex.pse__Sunday_Hours__c == null ? 0 : ex.pse__Sunday_Hours__c;
+            }
+        }
+
+        System.assertEquals(input.numberOfHours.setScale(5), actualTotal.setScale(5), 'Total hours with existing exceptions should equal input numberOfHours');
     }
 }
