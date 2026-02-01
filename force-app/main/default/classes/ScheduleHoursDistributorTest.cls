@@ -175,6 +175,70 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testPercentageRedistribution() {
+        // Controlled input where category percentages sum < 100 (10+10+10 = 30)
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 3, 1);
+        input.endDate = Date.newInstance(2025, 3, 21);
+        input.numberOfHours = Decimal.valueOf('90');
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 1;
+        input.cat2Weeks = 1;
+        input.cat3Weeks = 1;
+        input.postWeeks = 0;
+        // Low percentages to force redistribution
+        input.cat1Percentage = 10;
+        input.cat2Percentage = 10;
+        input.cat3Percentage = 10;
+        input.postPercentage = 0;
+        input.onsiteStartDate = null;
+        input.onsiteEndDate = null;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(null, result[0].errorMessage, 'Should be no error');
+        System.assert(result[0].scheduleExceptions.size() > 0, 'Should generate exceptions');
+
+        // There are 3 valid categories; original sum = 30, diff = 70, addEach = 70/3 -> expected per-category pct = 10 + 70/3 = 33.333...
+        Decimal sumOrig = input.cat1Percentage + input.cat2Percentage + input.cat3Percentage;
+        Decimal diff = 100 - sumOrig;
+        Integer validCount = 3;
+        Decimal addEach = diff / validCount;
+        Decimal expectedCatPct = input.cat1Percentage + addEach; // same for each cat in this test
+
+        // Each category covers 1 week (7 days) trimmed to weekdays -> usable days should be 5 each
+        Integer expectedUsable = 5;
+        // Expected hours per day per category = ((expectedPct/100) * totalHours) / usableDays
+        Decimal expectedHoursPerDay = ((expectedCatPct / 100) * input.numberOfHours) / expectedUsable;
+
+        // Expected total hours should equal input.numberOfHours
+        Decimal expectedTotal = input.numberOfHours;
+
+        // Compute actual total from generated exceptions and assert weekday hour values equal expectedHoursPerDay
+        Decimal actualTotal = Decimal.valueOf('0');
+        for (pse__Schedule_Exception__c ex : result[0].scheduleExceptions) {
+            Date s = ex.pse__Date__c;
+            Date e = ex.pse__End_Date__c == null ? ex.pse__Date__c : ex.pse__End_Date__c;
+            for (Date d = s; d <= e; d = d.addDays(1)) {
+                Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Mon..7=Sun
+                if (dow == 1) { actualTotal += ex.pse__Monday_Hours__c == null ? 0 : ex.pse__Monday_Hours__c; if (ex.pse__Monday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Monday_Hours__c.setScale(5)); }
+                if (dow == 2) { actualTotal += ex.pse__Tuesday_Hours__c == null ? 0 : ex.pse__Tuesday_Hours__c; if (ex.pse__Tuesday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Tuesday_Hours__c.setScale(5)); }
+                if (dow == 3) { actualTotal += ex.pse__Wednesday_Hours__c == null ? 0 : ex.pse__Wednesday_Hours__c; if (ex.pse__Wednesday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Wednesday_Hours__c.setScale(5)); }
+                if (dow == 4) { actualTotal += ex.pse__Thursday_Hours__c == null ? 0 : ex.pse__Thursday_Hours__c; if (ex.pse__Thursday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Thursday_Hours__c.setScale(5)); }
+                if (dow == 5) { actualTotal += ex.pse__Friday_Hours__c == null ? 0 : ex.pse__Friday_Hours__c; if (ex.pse__Friday_Hours__c != null) System.assertEquals(expectedHoursPerDay.setScale(5), ex.pse__Friday_Hours__c.setScale(5)); }
+                if (dow == 6) { actualTotal += ex.pse__Saturday_Hours__c == null ? 0 : ex.pse__Saturday_Hours__c; }
+                if (dow == 7) { actualTotal += ex.pse__Sunday_Hours__c == null ? 0 : ex.pse__Sunday_Hours__c; }
+            }
+        }
+
+        // Compare totals with scale
+        System.assertEquals(expectedTotal.setScale(5), actualTotal.setScale(5), 'Total hours after redistribution should equal input numberOfHours');
+    }
+
+    @isTest
     static void testGenerateScheduleExceptions() {
         // Retrieve the created Schedule
         pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c LIMIT 1];
