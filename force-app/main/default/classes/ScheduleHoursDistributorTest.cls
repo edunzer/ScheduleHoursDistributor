@@ -19,6 +19,71 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testMathFunctions() {
+        // Retrieve the created Schedule
+        pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c FROM pse__Schedule__c LIMIT 1];
+
+        // Define a segment with a holiday in the middle
+        Date segStart = Date.newInstance(2025, 3, 1);
+        Date segEnd = Date.newInstance(2025, 3, 7);
+        Set<Date> splits = new Set<Date>{ Date.newInstance(2025, 3, 4) };// holiday on 4th
+
+        List<pse__Schedule_Exception__c> allExceptions = new List<pse__Schedule_Exception__c>();
+        List<pse__Schedule_Exception__c> catList = new List<pse__Schedule_Exception__c>();
+
+        Decimal hoursPerDay = Decimal.valueOf('2.5');
+
+        // Call addSplitExceptions to split the segment around the holiday
+        ScheduleHoursDistributor.addSplitExceptions(
+            segStart, segEnd, hoursPerDay, 5, schedule.Id, schedule.pse__Start_Date__c, schedule.pse__End_Date__c, splits, allExceptions, catList
+        );
+
+        // Expect two exceptions: before holiday and after holiday
+        System.assertEquals(2, catList.size(), 'Segment with single split should produce two exceptions');
+        System.assertEquals(2, allExceptions.size(), 'All exceptions should contain the two created exceptions');
+
+        // Sum of days covered by exceptions should equal seg range minus splits
+        Integer summedDays = 0;
+        for (pse__Schedule_Exception__c ex : catList) {
+            Integer len = ex.pse__Date__c.daysBetween(ex.pse__End_Date__c) + 1;
+            summedDays += len;
+            // Verify hours fields for Mon-Fri are set to hoursPerDay (workDays = 5)
+            System.assertEquals(hoursPerDay, ex.pse__Monday_Hours__c, 'Monday hours should equal hoursPerDay');
+            System.assertEquals(hoursPerDay, ex.pse__Tuesday_Hours__c, 'Tuesday hours should equal hoursPerDay');
+            System.assertEquals(hoursPerDay, ex.pse__Wednesday_Hours__c, 'Wednesday hours should equal hoursPerDay');
+            System.assertEquals(hoursPerDay, ex.pse__Thursday_Hours__c, 'Thursday hours should equal hoursPerDay');
+            System.assertEquals(hoursPerDay, ex.pse__Friday_Hours__c, 'Friday hours should equal hoursPerDay');
+            System.assertEquals(Decimal.valueOf('0'), ex.pse__Saturday_Hours__c, 'Saturday hours should be 0');
+            System.assertEquals(Decimal.valueOf('0'), ex.pse__Sunday_Hours__c, 'Sunday hours should be 0');
+        }
+
+        // The total non-split days should be seg length minus number of split days (1)
+        Integer totalRangeDays = segStart.daysBetween(segEnd) + 1;
+        System.assertEquals(totalRangeDays - splits.size(), Integer.valueOf(summedDays), 'Summed days should equal total days minus splits');
+
+        // Validate countUsableWorkdays matches manual weekday counting (excluding splits)
+        Integer counted = ScheduleHoursDistributor.countUsableWorkdays(segStart, segEnd, splits);
+        Integer expectedCount = 0;
+        for (Date d = segStart; d <= segEnd; d = d.addDays(1)) {
+            if (ScheduleHoursDistributor.isWeekday(d) && !splits.contains(d)) expectedCount++;
+        }
+        System.assertEquals(expectedCount, counted, 'countUsableWorkdays should match manual weekday count excluding splits');
+
+        // Validate total hours computed from usable days matches hoursPerDay * usableDays
+        Decimal totalHoursFromCount = hoursPerDay * counted;
+        // Compute total hours represented by the exceptions (only count weekdays)
+        Decimal totalHoursFromExceptions = Decimal.valueOf('0');
+        for (pse__Schedule_Exception__c ex : catList) {
+            for (Date d = ex.pse__Date__c; d <= ex.pse__End_Date__c; d = d.addDays(1)) {
+                if (ScheduleHoursDistributor.isWeekday(d)) {
+                    totalHoursFromExceptions += hoursPerDay;
+                }
+            }
+        }
+        System.assertEquals(totalHoursFromCount, totalHoursFromExceptions, 'Total hours computed from usable days should match hours represented by exceptions');
+    }
+
+    @isTest
     static void testGenerateScheduleExceptions() {
         // Retrieve the created Schedule
         pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c LIMIT 1];
