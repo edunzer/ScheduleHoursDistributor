@@ -248,6 +248,49 @@ public with sharing class ScheduleHoursDistributor {
                 ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postHoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
             }
 
+            // Ensure total assigned hours (to 2 decimals) equal the requested numberOfHours by
+            // computing any small residual and applying it to the last generated exception's last weekday field.
+            Decimal totalAssigned = 0;
+            for (pse__Schedule_Exception__c exc : allExceptions) {
+                Date s = exc.pse__Date__c;
+                Date e = exc.pse__End_Date__c == null ? s : exc.pse__End_Date__c;
+                for (Date d = s; d <= e; d = d.addDays(1)) {
+                    Integer dow = d.toStartOfWeek().daysBetween(d) + 1;
+                    if (dow == 1) totalAssigned += (exc.pse__Monday_Hours__c == null ? 0 : exc.pse__Monday_Hours__c);
+                    if (dow == 2) totalAssigned += (exc.pse__Tuesday_Hours__c == null ? 0 : exc.pse__Tuesday_Hours__c);
+                    if (dow == 3) totalAssigned += (exc.pse__Wednesday_Hours__c == null ? 0 : exc.pse__Wednesday_Hours__c);
+                    if (dow == 4) totalAssigned += (exc.pse__Thursday_Hours__c == null ? 0 : exc.pse__Thursday_Hours__c);
+                    if (dow == 5) totalAssigned += (exc.pse__Friday_Hours__c == null ? 0 : exc.pse__Friday_Hours__c);
+                    if (dow == 6) totalAssigned += (exc.pse__Saturday_Hours__c == null ? 0 : exc.pse__Saturday_Hours__c);
+                    if (dow == 7) totalAssigned += (exc.pse__Sunday_Hours__c == null ? 0 : exc.pse__Sunday_Hours__c);
+                }
+            }
+
+            Decimal hoursDiff = input.numberOfHours - totalAssigned;
+            Decimal adj = hoursDiff.setScale(2, System.RoundingMode.HALF_UP);
+            if (adj != 0) {
+                // Find last exception in the last usable category, fallback to last of allExceptions
+                pse__Schedule_Exception__c target = null;
+                if (usableCats != null && usableCats.size() > 0) {
+                    String lastUsableCat = usableCats[usableCats.size()-1];
+                    List<pse__Schedule_Exception__c> lastCatList = catExceptions.get(lastUsableCat);
+                    if (lastCatList != null && lastCatList.size() > 0) target = lastCatList[lastCatList.size()-1];
+                }
+                if (target == null && allExceptions.size() > 0) target = allExceptions[allExceptions.size()-1];
+
+                if (target != null) {
+                    Date endDate = target.pse__End_Date__c == null ? target.pse__Date__c : target.pse__End_Date__c;
+                    Integer dow = endDate.toStartOfWeek().daysBetween(endDate) + 1;
+                    if (dow == 1) target.pse__Monday_Hours__c = (target.pse__Monday_Hours__c == null ? 0 : target.pse__Monday_Hours__c) + adj;
+                    if (dow == 2) target.pse__Tuesday_Hours__c = (target.pse__Tuesday_Hours__c == null ? 0 : target.pse__Tuesday_Hours__c) + adj;
+                    if (dow == 3) target.pse__Wednesday_Hours__c = (target.pse__Wednesday_Hours__c == null ? 0 : target.pse__Wednesday_Hours__c) + adj;
+                    if (dow == 4) target.pse__Thursday_Hours__c = (target.pse__Thursday_Hours__c == null ? 0 : target.pse__Thursday_Hours__c) + adj;
+                    if (dow == 5) target.pse__Friday_Hours__c = (target.pse__Friday_Hours__c == null ? 0 : target.pse__Friday_Hours__c) + adj;
+                    if (dow == 6) target.pse__Saturday_Hours__c = (target.pse__Saturday_Hours__c == null ? 0 : target.pse__Saturday_Hours__c) + adj;
+                    if (dow == 7) target.pse__Sunday_Hours__c = (target.pse__Sunday_Hours__c == null ? 0 : target.pse__Sunday_Hours__c) + adj;
+                }
+            }
+
             outputList.add(new ScheduleExceptionOutputWrapper(
                 allExceptions,
                 null
