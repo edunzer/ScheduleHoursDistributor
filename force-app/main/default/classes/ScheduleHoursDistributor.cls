@@ -181,11 +181,46 @@ public with sharing class ScheduleHoursDistributor {
             Integer postUsableDays = (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd)
                 ? countUsableWorkdays(postActualStart, postActualEnd, allSplits) : 0;
 
-            // Calculate hours per day for each category
-            Decimal cat1HoursPerDay = (cat1UsableDays > 0) ? ((cat1Pct/100) * input.numberOfHours) / cat1UsableDays : 0;
-            Decimal cat2HoursPerDay = (cat2UsableDays > 0) ? ((cat2Pct/100) * input.numberOfHours) / cat2UsableDays : 0;
-            Decimal cat3HoursPerDay = (cat3UsableDays > 0) ? ((cat3Pct/100) * input.numberOfHours) / cat3UsableDays : 0;
-            Decimal postHoursPerDay = (postUsableDays > 0) ? ((postPct/100) * input.numberOfHours) / postUsableDays : 0;
+            // Calculate hours per day for each category with 2-decimal rounding and residual assigned to last valid category
+            Map<String, Decimal> hoursPerDayMap = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
+            List<String> usableCats = new List<String>();
+            Map<String, Integer> usableDaysMap = new Map<String, Integer>{'cat1' => cat1UsableDays, 'cat2' => cat2UsableDays, 'cat3' => cat3UsableDays, 'post' => postUsableDays};
+            Map<String, Decimal> totalHoursMap = new Map<String, Decimal>{
+                'cat1' => (cat1Pct == null ? 0 : (cat1Pct/100) * input.numberOfHours),
+                'cat2' => (cat2Pct == null ? 0 : (cat2Pct/100) * input.numberOfHours),
+                'cat3' => (cat3Pct == null ? 0 : (cat3Pct/100) * input.numberOfHours),
+                'post' => (postPct == null ? 0 : (postPct/100) * input.numberOfHours)
+            };
+
+            // Build ordered list of categories that have usable days
+            if (cat1UsableDays > 0) usableCats.add('cat1');
+            if (cat2UsableDays > 0) usableCats.add('cat2');
+            if (cat3UsableDays > 0) usableCats.add('cat3');
+            if (postUsableDays > 0) usableCats.add('post');
+
+            Decimal assignedSum = 0;
+            Integer lastIdx = usableCats.size() - 1;
+            for (Integer i = 0; i < usableCats.size(); i++) {
+                String cat = usableCats[i];
+                Integer uDays = usableDaysMap.get(cat);
+                Decimal totalHours = totalHoursMap.get(cat);
+                if (i < lastIdx) {
+                    Decimal hpd = (uDays > 0) ? (totalHours / uDays).setScale(2, System.RoundingMode.HALF_UP) : 0;
+                    hoursPerDayMap.put(cat, hpd);
+                    assignedSum += hpd * uDays;
+                } else {
+                    // Last usable category: assign remaining hours so totals equal input.numberOfHours
+                    Decimal remaining = input.numberOfHours - assignedSum;
+                    Decimal hpd = (uDays > 0) ? (remaining / uDays).setScale(2, System.RoundingMode.HALF_UP) : 0;
+                    hoursPerDayMap.put(cat, hpd);
+                    assignedSum += hpd * uDays;
+                }
+            }
+
+            Decimal cat1HoursPerDay = hoursPerDayMap.get('cat1');
+            Decimal cat2HoursPerDay = hoursPerDayMap.get('cat2');
+            Decimal cat3HoursPerDay = hoursPerDayMap.get('cat3');
+            Decimal postHoursPerDay = hoursPerDayMap.get('post');
 
             // Debug logs for diagnosis
             if (DEBUG) {
