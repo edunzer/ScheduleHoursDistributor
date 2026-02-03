@@ -208,8 +208,8 @@ public with sharing class ScheduleHoursDistributor {
             for (pse__Schedule_Exception__c exc : existingExceptions) {
                 if (exc == null || exc.pse__Date__c == null) continue;
                 Date start = exc.pse__Date__c;
-                Date end = exc.pse__End_Date__c == null ? start : exc.pse__End_Date__c;
-                for (Date d = start; d <= end; d = d.addDays(1)) {
+                Date endDate = exc.pse__End_Date__c == null ? start : exc.pse__End_Date__c;
+                for (Date d = start; d <= endDate; d = d.addDays(1)) {
                     holidayDates.add(d);
                 }
             }
