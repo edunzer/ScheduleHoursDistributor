@@ -63,7 +63,6 @@ public with sharing class ScheduleHoursDistributor {
             Boolean cat2Valid = true;
             Boolean cat1Valid = true;
 
-
             // Calculate post category range (if valid)
             Date postStart = null;
             Date postEnd = null;
@@ -104,6 +103,7 @@ public with sharing class ScheduleHoursDistributor {
             Date postActualEnd = postValid ? (postEnd < input.endDate ? postEnd : input.endDate) : null;
 
             // 5. Redistribute percentages: sum valid, get diff from 100, add even split of diff to each valid
+            // Then round to 2 decimals and assign any residual to the last valid category to preserve total = 100
             Decimal cat1Pct = 0, cat2Pct = 0, cat3Pct = 0, postPct = 0;
             List<Decimal> origPcts = new List<Decimal>();
             List<String> validCats = new List<String>();
@@ -118,12 +118,28 @@ public with sharing class ScheduleHoursDistributor {
             Decimal addEach = validCount > 0 ? diff / validCount : 0;
             Integer idx = 0;
             for (String cat : validCats) {
-                Decimal pct = origPcts[idx] + addEach;
+                Decimal pct = (origPcts[idx] + addEach);
+                // round to 2 decimal places
+                pct = pct.setScale(2, System.RoundingMode.HALF_UP);
                 if (cat == 'cat1') cat1Pct = pct;
                 if (cat == 'cat2') cat2Pct = pct;
                 if (cat == 'cat3') cat3Pct = pct;
                 if (cat == 'post') postPct = pct;
                 idx++;
+            }
+            // Adjust last valid category to ensure total equals 100 after rounding
+            if (validCount > 0) {
+                Decimal sumRounded = 0;
+                if (cat1Valid) sumRounded += cat1Pct;
+                if (cat2Valid) sumRounded += cat2Pct;
+                if (cat3Valid) sumRounded += cat3Pct;
+                if (postValid) sumRounded += postPct;
+                Decimal residual = 100 - sumRounded;
+                String lastCat = validCats[validCount - 1];
+                if (lastCat == 'cat1') cat1Pct = (cat1Pct + residual).setScale(2, System.RoundingMode.HALF_UP);
+                if (lastCat == 'cat2') cat2Pct = (cat2Pct + residual).setScale(2, System.RoundingMode.HALF_UP);
+                if (lastCat == 'cat3') cat3Pct = (cat3Pct + residual).setScale(2, System.RoundingMode.HALF_UP);
+                if (lastCat == 'post') postPct = (postPct + residual).setScale(2, System.RoundingMode.HALF_UP);
             }
 
             // 6. Create exceptions for each valid category, ensuring no overlap and onsite gap is its own exception
