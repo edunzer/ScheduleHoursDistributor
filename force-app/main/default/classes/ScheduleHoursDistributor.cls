@@ -334,14 +334,6 @@ public with sharing class ScheduleHoursDistributor {
 
         @InvocableVariable(label='Existing Schedule Exceptions') 
         public List<pse__Schedule_Exception__c> existingExceptions;
-
-        public Date cat1StartDate;
-        public Date cat1EndDate;
-        public Date cat2StartDate;
-        public Date cat2EndDate;
-        public Date cat3StartDate;
-        public Date cat3EndDate;
-        public Date postStartDate;
-        public Date postEndDate;
+        
     }
 }
