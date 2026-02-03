@@ -1,4 +1,5 @@
 public with sharing class ScheduleHoursDistributor {
+    private static final Boolean DEBUG = false;
 
     @InvocableMethod(label='Generate Category Schedule Exceptions' description='Generates schedule exception records for a category, skipping holidays.')
     public static List<ScheduleExceptionOutputWrapper> generateCategoryScheduleExceptions(List<ScheduleInput> inputList) {
@@ -171,11 +172,13 @@ public with sharing class ScheduleHoursDistributor {
             Decimal postHoursPerDay = (postUsableDays > 0) ? ((postPct/100) * input.numberOfHours) / postUsableDays : 0;
 
             // Debug logs for diagnosis
-            System.debug('CAT1: start=' + cat1ActualStart + ', end=' + cat1ActualEnd + ', usableDays=' + cat1UsableDays + ', pct=' + cat1Pct + ', hoursPerDay=' + cat1HoursPerDay);
-            System.debug('CAT2: start=' + cat2ActualStart + ', end=' + cat2ActualEnd + ', usableDays=' + cat2UsableDays + ', pct=' + cat2Pct + ', hoursPerDay=' + cat2HoursPerDay);
-            System.debug('CAT3: start=' + cat3ActualStart + ', end=' + cat3ActualEnd + ', usableDays=' + cat3UsableDays + ', pct=' + cat3Pct + ', hoursPerDay=' + cat3HoursPerDay);
-            System.debug('POST: start=' + postActualStart + ', end=' + postActualEnd + ', usableDays=' + postUsableDays + ', pct=' + postPct + ', hoursPerDay=' + postHoursPerDay);
-            System.debug('allSplits (holidays+onsiteGap): ' + allSplits);
+            if (DEBUG) {
+                System.debug('CAT1: start=' + cat1ActualStart + ', end=' + cat1ActualEnd + ', usableDays=' + cat1UsableDays + ', pct=' + cat1Pct + ', hoursPerDay=' + cat1HoursPerDay);
+                System.debug('CAT2: start=' + cat2ActualStart + ', end=' + cat2ActualEnd + ', usableDays=' + cat2UsableDays + ', pct=' + cat2Pct + ', hoursPerDay=' + cat2HoursPerDay);
+                System.debug('CAT3: start=' + cat3ActualStart + ', end=' + cat3ActualEnd + ', usableDays=' + cat3UsableDays + ', pct=' + cat3Pct + ', hoursPerDay=' + cat3HoursPerDay);
+                System.debug('POST: start=' + postActualStart + ', end=' + postActualEnd + ', usableDays=' + postUsableDays + ', pct=' + postPct + ', hoursPerDay=' + postHoursPerDay);
+                System.debug('allSplits (holidays+onsiteGap): ' + allSplits);
+            }
 
             // Cat1
             if (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd) {
@@ -275,9 +278,13 @@ public with sharing class ScheduleHoursDistributor {
             if (weekday && !excluded) {
                 count++;
             }
-            System.debug('countUsableWorkdays: date=' + d + ', isWeekday=' + weekday + ', isExcluded=' + excluded + ', runningCount=' + count);
+            if (DEBUG) {
+                System.debug('countUsableWorkdays: date=' + d + ', isWeekday=' + weekday + ', isExcluded=' + excluded + ', runningCount=' + count);
+            }
         }
-        System.debug('countUsableWorkdays: FINAL count for range ' + start + ' to ' + endDate + ' (excludes=' + excludeDates + ') = ' + count);
+        if (DEBUG) {
+            System.debug('countUsableWorkdays: FINAL count for range ' + start + ' to ' + endDate + ' (excludes=' + excludeDates + ') = ' + count);
+        }
         return count;
     }
 
