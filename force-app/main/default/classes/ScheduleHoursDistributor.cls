@@ -13,6 +13,7 @@ public with sharing class ScheduleHoursDistributor {
             if (input.scheduleId == null) return returnErrorWrapper('Error: Schedule ID cannot be null.');
             if (input.startDate == null) return returnErrorWrapper('Error: Start Date cannot be null.');
             if (input.endDate == null) return returnErrorWrapper('Error: End Date cannot be null.');
+            if (input.startDate > input.endDate) return returnErrorWrapper('Error: Start Date must be on or before End Date.');
             if (input.numberOfHours == null) return returnErrorWrapper('Error: Number of Hours cannot be null.');
             if (input.numberOfWorkDays == null) return returnErrorWrapper('Error: Number of Work Days cannot be null.');
             if (input.cat1Weeks == null || input.cat2Weeks == null || input.cat3Weeks == null || input.postWeeks == null)
@@ -21,6 +22,8 @@ public with sharing class ScheduleHoursDistributor {
                 return returnErrorWrapper('Error: Percentage values cannot be null.');
             if ((input.onsiteStartDate != null && input.onsiteEndDate == null) || (input.onsiteStartDate == null && input.onsiteEndDate != null))
                 return returnErrorWrapper('Error: Both Onsite Start Date and Onsite End Date must be provided.');
+            if (input.onsiteStartDate != null && input.onsiteEndDate != null && input.onsiteStartDate > input.onsiteEndDate)
+                return returnErrorWrapper('Error: Onsite Start Date must be on or before Onsite End Date.');
 
             // 1. Calculate holidays
             Set<Date> holidayDates = extractHolidayDates(input.existingExceptions);
