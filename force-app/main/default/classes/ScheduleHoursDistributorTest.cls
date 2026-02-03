@@ -445,8 +445,7 @@ public class ScheduleHoursDistributorTest {
         Integer cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, new Set<Date>());
         Integer expected = 0;
         for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
-            Integer dow = d.dayOfWeek(); // 1=Sun,2=Mon,...7=Sat
-            if (dow >= 2 && dow <= 6) expected++;
+            if (ScheduleHoursDistributor.isWeekday(d)) expected++;
         }
         System.assertEquals(expected, cnt);
 
@@ -455,8 +454,7 @@ public class ScheduleHoursDistributorTest {
         cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, excl);
         expected = 0;
         for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
-            Integer dow = d.dayOfWeek();
-            if (dow >= 2 && dow <= 6 && !excl.contains(d)) expected++;
+            if (ScheduleHoursDistributor.isWeekday(d) && !excl.contains(d)) expected++;
         }
         System.assertEquals(expected, cnt);
 
@@ -466,8 +464,7 @@ public class ScheduleHoursDistributorTest {
         cnt = ScheduleHoursDistributor.countUsableWorkdays(bStart, bEnd, new Set<Date>());
         expected = 0;
         for (Date d = bStart; d <= bEnd; d = d.addDays(1)) {
-            Integer dow = d.dayOfWeek();
-            if (dow >= 2 && dow <= 6) expected++;
+            if (ScheduleHoursDistributor.isWeekday(d)) expected++;
         }
         System.assertEquals(expected, cnt);
 
@@ -476,8 +473,7 @@ public class ScheduleHoursDistributorTest {
         cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, exclAll);
         expected = 0;
         for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
-            Integer dow = d.dayOfWeek();
-            if (dow >= 2 && dow <= 6 && !exclAll.contains(d)) expected++;
+            if (ScheduleHoursDistributor.isWeekday(d) && !exclAll.contains(d)) expected++;
         }
         System.assertEquals(expected, cnt);
     }
