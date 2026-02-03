@@ -303,7 +303,7 @@ public class ScheduleHoursDistributorTest {
         input.numberOfHours = 50;
         input.numberOfWorkDays = 5;
         input.cat1Weeks = 1; input.cat2Weeks = 0; input.cat3Weeks = 0; input.postWeeks = 0;
-        input.cat1Percentage = 100; input.cat2Percentage = 0; input.cat3Percentage = 0; input.postPercentage = 0;
+        input.cat1Percentage = 60; input.cat2Percentage = 20; input.cat3Percentage = 15; input.postPercentage = 5;
         input.existingExceptions = new List<pse__Schedule_Exception__c>();
 
         List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
@@ -349,7 +349,7 @@ public class ScheduleHoursDistributorTest {
         input.numberOfHours = 50;
         input.numberOfWorkDays = 5;
         input.cat1Weeks = 1; input.cat2Weeks = 0; input.cat3Weeks = 0; input.postWeeks = 0;
-        input.cat1Percentage = 100; input.cat2Percentage = 0; input.cat3Percentage = 0; input.postPercentage = 0;
+        input.cat1Percentage = 60; input.cat2Percentage = 20; input.cat3Percentage = 15; input.postPercentage = 5;
         input.existingExceptions = new List<pse__Schedule_Exception__c>{ holiday };
 
         List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
