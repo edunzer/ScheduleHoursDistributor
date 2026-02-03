@@ -383,4 +383,123 @@ public class ScheduleHoursDistributorTest {
 
         System.assertEquals(input.numberOfHours.setScale(2), totalHours.setScale(2), 'Total distributed hours should still equal requested hours even with holidays');
     }
+
+    @isTest
+    static void testExtractHolidayDates_NullAndRanges() {
+        // Single-day, multi-day and null entry
+        List<pse__Schedule_Exception__c> listWithNull = new List<pse__Schedule_Exception__c>();
+        listWithNull.add(null);
+        listWithNull.add(new pse__Schedule_Exception__c(pse__Date__c = Date.newInstance(2025,4,1), pse__End_Date__c = null));
+        listWithNull.add(new pse__Schedule_Exception__c(pse__Date__c = Date.newInstance(2025,4,10), pse__End_Date__c = Date.newInstance(2025,4,12)));
+
+        Set<Date> holidays = ScheduleHoursDistributor.extractHolidayDates(listWithNull);
+        System.assertEquals(true, holidays.contains(Date.newInstance(2025,4,1)));
+        System.assertEquals(true, holidays.contains(Date.newInstance(2025,4,10)));
+        System.assertEquals(true, holidays.contains(Date.newInstance(2025,4,11)));
+        System.assertEquals(true, holidays.contains(Date.newInstance(2025,4,12)));
+        System.assertEquals(4, holidays.size(), 'Should include all dates from single and multi-day exceptions');
+
+        Set<Date> emptyHolidays = ScheduleHoursDistributor.extractHolidayDates(null);
+        System.assertEquals(0, emptyHolidays.size(), 'Null input should return empty set');
+    }
+
+    @isTest
+    static void testAddSplitExceptions_SplittingBehavior() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+
+        // 1) segStart is a split -> first segment should start at next day
+        Date segStart = Date.newInstance(2025,1,6);
+        Date segEnd = Date.newInstance(2025,1,10);
+        Set<Date> splits = new Set<Date>{ Date.newInstance(2025,1,6) };
+        List<pse__Schedule_Exception__c> allEx = new List<pse__Schedule_Exception__c>();
+        List<pse__Schedule_Exception__c> cat = new List<pse__Schedule_Exception__c>();
+        ScheduleHoursDistributor.addSplitExceptions(segStart, segEnd, 8, 5, schedule.Id, segStart, segEnd, splits, allEx, cat);
+        System.assert(cat.size() > 0, 'Should create a segment after the initial split day');
+        System.assertEquals(Date.newInstance(2025,1,7), cat[0].pse__Date__c, 'First segment should start at 2025-01-07');
+
+        // 2) all days are splits -> no exceptions created
+        splits = new Set<Date>();
+        for (Date d = segStart; d <= segEnd; d = d.addDays(1)) splits.add(d);
+        allEx.clear(); cat.clear();
+        ScheduleHoursDistributor.addSplitExceptions(segStart, segEnd, 8, 5, schedule.Id, segStart, segEnd, splits, allEx, cat);
+        System.assertEquals(0, cat.size(), 'When all days are splits, no exceptions should be created');
+
+        // 3) multiple split days produce multiple exceptions
+        segStart = Date.newInstance(2025,1,6);
+        segEnd = Date.newInstance(2025,1,20);
+        splits = new Set<Date>{ Date.newInstance(2025,1,10), Date.newInstance(2025,1,15) };
+        allEx.clear(); cat.clear();
+        ScheduleHoursDistributor.addSplitExceptions(segStart, segEnd, 8, 5, schedule.Id, segStart, segEnd, splits, allEx, cat);
+        System.assertEquals(3, cat.size(), 'Should produce three split segments for two split days');
+        // verify boundaries roughly
+        System.assertEquals(Date.newInstance(2025,1,6), cat[0].pse__Date__c);
+        System.assertEquals(Date.newInstance(2025,1,9), cat[0].pse__End_Date__c);
+        System.assertEquals(Date.newInstance(2025,1,11), cat[1].pse__Date__c);
+    }
+
+    @isTest
+    static void testCountUsableWorkdays_VariousRanges() {
+        // Mon-Fri full week
+        Date aStart = Date.newInstance(2025,1,6);
+        Date aEnd = Date.newInstance(2025,1,10);
+        Integer cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, new Set<Date>());
+        Integer expected = 0;
+        for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
+            Integer dow = d.dayOfWeek(); // 1=Sun,2=Mon,...7=Sat
+            if (dow >= 2 && dow <= 6) expected++;
+        }
+        System.assertEquals(expected, cnt);
+
+        // with holiday on Wed
+        Set<Date> excl = new Set<Date>{ Date.newInstance(2025,1,8) };
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, excl);
+        expected = 0;
+        for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
+            Integer dow = d.dayOfWeek();
+            if (dow >= 2 && dow <= 6 && !excl.contains(d)) expected++;
+        }
+        System.assertEquals(expected, cnt);
+
+        // range Fri-Sun
+        Date bStart = Date.newInstance(2025,1,10);
+        Date bEnd = Date.newInstance(2025,1,12);
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(bStart, bEnd, new Set<Date>());
+        expected = 0;
+        for (Date d = bStart; d <= bEnd; d = d.addDays(1)) {
+            Integer dow = d.dayOfWeek();
+            if (dow >= 2 && dow <= 6) expected++;
+        }
+        System.assertEquals(expected, cnt);
+
+        // excludeDates removes all weekdays
+        Set<Date> exclAll = new Set<Date>{ Date.newInstance(2025,1,6), Date.newInstance(2025,1,7), Date.newInstance(2025,1,8), Date.newInstance(2025,1,9), Date.newInstance(2025,1,10) };
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, exclAll);
+        expected = 0;
+        for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
+            Integer dow = d.dayOfWeek();
+            if (dow >= 2 && dow <= 6 && !exclAll.contains(d)) expected++;
+        }
+        System.assertEquals(expected, cnt);
+    }
+
+    @isTest
+    static void testAllCategoriesInvalid_NoCrash() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025,1,1);
+        input.endDate = Date.newInstance(2025,1,10);
+        input.numberOfHours = 40;
+        input.numberOfWorkDays = 5;
+        // zero weeks -> should make categories invalid
+        input.cat1Weeks = 0; input.cat2Weeks = 0; input.cat3Weeks = 0; input.postWeeks = 0;
+        input.cat1Percentage = 25; input.cat2Percentage = 25; input.cat3Percentage = 25; input.postPercentage = 25;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(1, result.size());
+        System.assertEquals(null, result[0].errorMessage);
+        // No categories valid -> expect zero generated exceptions
+        System.assertEquals(0, result[0].scheduleExceptions.size());
+    }
 }
