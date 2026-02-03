@@ -206,12 +206,7 @@ public with sharing class ScheduleHoursDistributor {
         Set<Date> holidayDates = new Set<Date>();
         if (existingExceptions != null) {
             for (pse__Schedule_Exception__c exc : existingExceptions) {
-                if (exc == null || exc.pse__Date__c == null) continue;
-                Date start = exc.pse__Date__c;
-                Date endDate = exc.pse__End_Date__c == null ? start : exc.pse__End_Date__c;
-                for (Date d = start; d <= endDate; d = d.addDays(1)) {
-                    holidayDates.add(d);
-                }
+                holidayDates.add(exc.pse__Date__c);
             }
         }
         return holidayDates;
@@ -250,10 +245,9 @@ public with sharing class ScheduleHoursDistributor {
         Date currStart = null;
         for (Date d = segStart; d <= segEnd.addDays(1); d = d.addDays(1)) {
             Boolean isSplit = (d > segEnd) || allSplits.contains(d);
-            // Use the segment bounds when deciding whether to start/continue a segment.
-            if (currStart == null && !allSplits.contains(d) && d >= segStart && d <= segEnd) {
+            if (currStart == null && !allSplits.contains(d) && d >= inputStart && d <= inputEnd) {
                 currStart = d;
-            } else if (currStart != null && !isSplit && d >= segStart && d <= segEnd) {
+            } else if (currStart != null && !isSplit && d >= inputStart && d <= inputEnd) {
                 // continue current segment
             } else if (currStart != null && isSplit) {
                 pse__Schedule_Exception__c exc = createScheduleException(scheduleId, currStart, d.addDays(-1), workDays, hoursPerDay);
