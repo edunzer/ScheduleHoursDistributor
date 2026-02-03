@@ -206,7 +206,12 @@ public with sharing class ScheduleHoursDistributor {
         Set<Date> holidayDates = new Set<Date>();
         if (existingExceptions != null) {
             for (pse__Schedule_Exception__c exc : existingExceptions) {
-                holidayDates.add(exc.pse__Date__c);
+                if (exc == null || exc.pse__Date__c == null) continue;
+                Date start = exc.pse__Date__c;
+                Date endDate = exc.pse__End_Date__c == null ? start : exc.pse__End_Date__c;
+                for (Date d = start; d <= endDate; d = d.addDays(1)) {
+                    holidayDates.add(d);
+                }
             }
         }
         return holidayDates;
