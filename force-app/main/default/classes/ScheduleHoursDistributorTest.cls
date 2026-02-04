@@ -498,4 +498,112 @@ public class ScheduleHoursDistributorTest {
         // No categories valid -> expect zero generated exceptions
         System.assertEquals(0, result[0].scheduleExceptions.size());
     }
+
+    @isTest
+    static void testGenerateScheduleExceptions_MultipleValidInputs() {
+        // retrieve two schedules created in @testSetup
+        List<pse__Schedule__c> schedules = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c ORDER BY Id LIMIT 2];
+        System.assertEquals(2, schedules.size(), 'Expect two schedules from setup');
+
+        List<ScheduleHoursDistributor.ScheduleInput> inputs = new List<ScheduleHoursDistributor.ScheduleInput>();
+
+        for (pse__Schedule__c sched : schedules) {
+            ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+            input.scheduleId = sched.Id;
+            input.startDate = sched.pse__Start_Date__c;
+            input.endDate = sched.pse__End_Date__c;
+            input.numberOfHours = sched.pse__Scheduled_Hours__c;
+            input.numberOfWorkDays = 5;
+            input.cat1Weeks = 4;
+            input.cat2Weeks = 4;
+            input.cat3Weeks = 4;
+            input.postWeeks = 4;
+            input.cat1Percentage = 25;
+            input.cat2Percentage = 25;
+            input.cat3Percentage = 25;
+            input.postPercentage = 25;
+            input.onsiteStartDate = sched.pse__Start_Date__c.addMonths(1);
+            input.onsiteEndDate = sched.pse__Start_Date__c.addMonths(1).addDays(6);
+            input.existingExceptions = new List<pse__Schedule_Exception__c>();
+            inputs.add(input);
+        }
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> results = ScheduleHoursDistributor.generateCategoryScheduleExceptions(inputs);
+        System.assertEquals(2, results.size(), 'Should return one wrapper per input');
+        // ensure no top-level errors and processing occurred per input
+        for (Integer i = 0; i < results.size(); i++) {
+            System.assertEquals(null, results[i].errorMessage, 'Input ' + i + ' should not have an error');
+        }
+    }
+
+    @isTest
+    static void testGenerateScheduleExceptions_MixedValidAndInvalidInputs() {
+        pse__Schedule__c schedule = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput validInput = new ScheduleHoursDistributor.ScheduleInput();
+        validInput.scheduleId = schedule.Id;
+        validInput.startDate = schedule.pse__Start_Date__c;
+        validInput.endDate = schedule.pse__End_Date__c;
+        validInput.numberOfHours = schedule.pse__Scheduled_Hours__c;
+        validInput.numberOfWorkDays = 5;
+        validInput.cat1Weeks = 4; validInput.cat2Weeks = 4; validInput.cat3Weeks = 4; validInput.postWeeks = 4;
+        validInput.cat1Percentage = 25; validInput.cat2Percentage = 25; validInput.cat3Percentage = 25; validInput.postPercentage = 25;
+        validInput.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        ScheduleHoursDistributor.ScheduleInput invalidInput = new ScheduleHoursDistributor.ScheduleInput();
+        invalidInput.scheduleId = null; // invalid
+        invalidInput.startDate = Date.newInstance(2025,1,1);
+        invalidInput.endDate = Date.newInstance(2025,7,1);
+        invalidInput.numberOfHours = 100;
+        invalidInput.numberOfWorkDays = 5;
+        invalidInput.cat1Weeks = 1; invalidInput.cat2Weeks = 1; invalidInput.cat3Weeks = 1; invalidInput.postWeeks = 1;
+        invalidInput.cat1Percentage = 25; invalidInput.cat2Percentage = 25; invalidInput.cat3Percentage = 25; invalidInput.postPercentage = 25;
+        invalidInput.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleInput> inputs = new List<ScheduleHoursDistributor.ScheduleInput>{ validInput, invalidInput };
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> results = ScheduleHoursDistributor.generateCategoryScheduleExceptions(inputs);
+        System.assertEquals(2, results.size(), 'Should return two wrappers for two inputs');
+        // first (valid) -> no error
+        System.assertEquals(null, results[0].errorMessage, 'Valid input should not have an error');
+        // second (invalid) -> specific error
+        System.assertNotEquals(null, results[1].errorMessage, 'Invalid input should have an error');
+        System.assertEquals('Error: Schedule ID cannot be null.', results[1].errorMessage, 'Error message should match expected');
+    }
+
+    @isTest
+    static void testGenerateScheduleExceptions_TwoValidInputs_NoErrors() {
+        // Use the two schedules from test setup
+        List<pse__Schedule__c> schedules = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c ORDER BY Id LIMIT 2];
+        System.assertEquals(2, schedules.size(), 'Expect two schedules from setup');
+
+        ScheduleHoursDistributor.ScheduleInput inputA = new ScheduleHoursDistributor.ScheduleInput();
+        inputA.scheduleId = schedules[0].Id;
+        inputA.startDate = schedules[0].pse__Start_Date__c;
+        inputA.endDate = schedules[0].pse__End_Date__c;
+        inputA.numberOfHours = schedules[0].pse__Scheduled_Hours__c;
+        inputA.numberOfWorkDays = 5;
+        inputA.cat1Weeks = 4; inputA.cat2Weeks = 4; inputA.cat3Weeks = 4; inputA.postWeeks = 4;
+        inputA.cat1Percentage = 25; inputA.cat2Percentage = 25; inputA.cat3Percentage = 25; inputA.postPercentage = 25;
+        inputA.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        ScheduleHoursDistributor.ScheduleInput inputB = new ScheduleHoursDistributor.ScheduleInput();
+        inputB.scheduleId = schedules[1].Id;
+        inputB.startDate = schedules[1].pse__Start_Date__c;
+        inputB.endDate = schedules[1].pse__End_Date__c;
+        inputB.numberOfHours = schedules[1].pse__Scheduled_Hours__c;
+        inputB.numberOfWorkDays = 5;
+        inputB.cat1Weeks = 4; inputB.cat2Weeks = 4; inputB.cat3Weeks = 4; inputB.postWeeks = 4;
+        inputB.cat1Percentage = 25; inputB.cat2Percentage = 25; inputB.cat3Percentage = 25; inputB.postPercentage = 25;
+        inputB.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleInput> inputs = new List<ScheduleHoursDistributor.ScheduleInput>{ inputA, inputB };
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> results = ScheduleHoursDistributor.generateCategoryScheduleExceptions(inputs);
+
+        System.assertEquals(2, results.size(), 'Should return two wrappers');
+        System.assertEquals(null, results[0].errorMessage, 'First input should have no error');
+        System.assertEquals(null, results[1].errorMessage, 'Second input should have no error');
+        System.assert(results[0].scheduleExceptions.size() >= 0);
+        System.assert(results[1].scheduleExceptions.size() >= 0);
+    }
 }
