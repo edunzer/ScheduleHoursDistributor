@@ -37,6 +37,12 @@ public with sharing class ScheduleHoursDistributor {
         if (input.onsiteStartDate != null && input.onsiteEndDate != null && input.onsiteStartDate > input.onsiteEndDate)
             return createErrorWrapper('Error: Onsite Start Date must be on or before Onsite End Date.');
 
+        // Check if numberOfWorkDays is 0 - if so, only return holiday exceptions
+        if (input.numberOfWorkDays <= 0) {
+            List<pse__Schedule_Exception__c> holidayExceptions = input.existingExceptions != null ? input.existingExceptions : new List<pse__Schedule_Exception__c>();
+            return new ScheduleExceptionOutputWrapper(holidayExceptions, null);
+        }
+
         // 1. Calculate holidays
         Set<Date> holidayDates = extractHolidayDates(input.existingExceptions);
 
