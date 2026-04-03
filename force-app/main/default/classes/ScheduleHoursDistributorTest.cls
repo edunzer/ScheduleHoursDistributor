@@ -439,43 +439,138 @@ public class ScheduleHoursDistributorTest {
 
     @isTest
     static void testCountUsableWorkdays_VariousRanges() {
-        // Mon-Fri full week
+        // Mon-Fri full week, workDays=5
         Date aStart = Date.newInstance(2025,1,6);
         Date aEnd = Date.newInstance(2025,1,10);
-        Integer cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, new Set<Date>());
+        Integer cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, new Set<Date>(), 5);
         Integer expected = 0;
         for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
             if (ScheduleHoursDistributor.isWeekday(d)) expected++;
         }
         System.assertEquals(expected, cnt);
 
-        // with holiday on Wed
+        // with holiday on Wed, workDays=5
         Set<Date> excl = new Set<Date>{ Date.newInstance(2025,1,8) };
-        cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, excl);
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, excl, 5);
         expected = 0;
         for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
             if (ScheduleHoursDistributor.isWeekday(d) && !excl.contains(d)) expected++;
         }
         System.assertEquals(expected, cnt);
 
-        // range Fri-Sun
+        // range Fri-Sun, workDays=5 (only Friday counts)
         Date bStart = Date.newInstance(2025,1,10);
         Date bEnd = Date.newInstance(2025,1,12);
-        cnt = ScheduleHoursDistributor.countUsableWorkdays(bStart, bEnd, new Set<Date>());
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(bStart, bEnd, new Set<Date>(), 5);
         expected = 0;
         for (Date d = bStart; d <= bEnd; d = d.addDays(1)) {
             if (ScheduleHoursDistributor.isWeekday(d)) expected++;
         }
         System.assertEquals(expected, cnt);
 
-        // excludeDates removes all weekdays
+        // excludeDates removes all weekdays, workDays=5
         Set<Date> exclAll = new Set<Date>{ Date.newInstance(2025,1,6), Date.newInstance(2025,1,7), Date.newInstance(2025,1,8), Date.newInstance(2025,1,9), Date.newInstance(2025,1,10) };
-        cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, exclAll);
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(aStart, aEnd, exclAll, 5);
         expected = 0;
         for (Date d = aStart; d <= aEnd; d = d.addDays(1)) {
             if (ScheduleHoursDistributor.isWeekday(d) && !exclAll.contains(d)) expected++;
         }
         System.assertEquals(expected, cnt);
+
+        // workDays=6: Mon-Sat range (Mon Jan 6 – Sat Jan 11 2025) should count 6 days
+        Date cStart = Date.newInstance(2025,1,6);
+        Date cEnd = Date.newInstance(2025,1,12); // Sun Jan 12
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(cStart, cEnd, new Set<Date>(), 6);
+        expected = 0;
+        for (Date d = cStart; d <= cEnd; d = d.addDays(1)) {
+            if (ScheduleHoursDistributor.isWorkingDay(d, 6)) expected++;
+        }
+        System.assertEquals(6, cnt, 'workDays=6 should count Mon-Sat (6 days), excluding Sunday');
+        System.assertEquals(expected, cnt);
+
+        // workDays=7: full week (Mon-Sun) should count all 7 days
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(cStart, cEnd, new Set<Date>(), 7);
+        expected = 0;
+        for (Date d = cStart; d <= cEnd; d = d.addDays(1)) {
+            if (ScheduleHoursDistributor.isWorkingDay(d, 7)) expected++;
+        }
+        System.assertEquals(7, cnt, 'workDays=7 should count all 7 days');
+        System.assertEquals(expected, cnt);
+    }
+
+    @isTest
+    static void testIsWorkingDay_SixAndSevenDayWeeks() {
+        // Fri Jan 10 2025
+        Date fri = Date.newInstance(2025, 1, 10);
+        // Sat Jan 11 2025
+        Date sat = Date.newInstance(2025, 1, 11);
+        // Sun Jan 12 2025
+        Date sun = Date.newInstance(2025, 1, 12);
+
+        // workDays <= 5: only Mon-Fri
+        System.assertEquals(true, ScheduleHoursDistributor.isWorkingDay(fri, 5), 'Friday is a working day for workDays=5');
+        System.assertEquals(false, ScheduleHoursDistributor.isWorkingDay(sat, 5), 'Saturday is not a working day for workDays=5');
+        System.assertEquals(false, ScheduleHoursDistributor.isWorkingDay(sun, 5), 'Sunday is not a working day for workDays=5');
+
+        // workDays == 6: Mon-Sat
+        System.assertEquals(true, ScheduleHoursDistributor.isWorkingDay(fri, 6), 'Friday is a working day for workDays=6');
+        System.assertEquals(true, ScheduleHoursDistributor.isWorkingDay(sat, 6), 'Saturday is a working day for workDays=6');
+        System.assertEquals(false, ScheduleHoursDistributor.isWorkingDay(sun, 6), 'Sunday is not a working day for workDays=6');
+
+        // workDays == 7: all days
+        System.assertEquals(true, ScheduleHoursDistributor.isWorkingDay(fri, 7), 'Friday is a working day for workDays=7');
+        System.assertEquals(true, ScheduleHoursDistributor.isWorkingDay(sat, 7), 'Saturday is a working day for workDays=7');
+        System.assertEquals(true, ScheduleHoursDistributor.isWorkingDay(sun, 7), 'Sunday is a working day for workDays=7');
+    }
+
+    @isTest
+    static void testMathWithSixDayWeek_TotalHoursMatch() {
+        // Verify that using numberOfWorkDays=6 correctly counts Mon-Sat when computing hours/day,
+        // so total assigned hours equal numberOfHours.
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2026,1,1) LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        // Use a 2-week window (Mon Jan 5 – Sat Jan 17 2026) with 6-day workweeks
+        input.startDate = Date.newInstance(2026, 1, 5);
+        input.endDate   = Date.newInstance(2026, 1, 17);
+        input.numberOfHours = 120;
+        input.numberOfWorkDays = 6;
+        input.cat1Weeks = 2;
+        input.cat2Weeks = 0;
+        input.cat3Weeks = 0;
+        input.postWeeks = 0;
+        input.cat1Percentage = 100;
+        input.cat2Percentage = 0;
+        input.cat3Percentage = 0;
+        input.postPercentage = 0;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result =
+            ScheduleHoursDistributor.generateCategoryScheduleExceptions(
+                new List<ScheduleHoursDistributor.ScheduleInput>{ input }
+            );
+
+        System.assertEquals(1, result.size());
+        System.assertEquals(null, result[0].errorMessage, 'Should have no error');
+
+        // Sum all day-of-week hours across every day in each exception
+        Decimal totalHours = 0;
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            Date s = exc.pse__Date__c;
+            Date e = exc.pse__End_Date__c == null ? s : exc.pse__End_Date__c;
+            for (Date d = s; d <= e; d = d.addDays(1)) {
+                Integer dow = d.toStartOfWeek().daysBetween(d) + 1;
+                if (dow == 1) totalHours += (exc.pse__Monday_Hours__c    == null ? 0 : exc.pse__Monday_Hours__c);
+                if (dow == 2) totalHours += (exc.pse__Tuesday_Hours__c   == null ? 0 : exc.pse__Tuesday_Hours__c);
+                if (dow == 3) totalHours += (exc.pse__Wednesday_Hours__c == null ? 0 : exc.pse__Wednesday_Hours__c);
+                if (dow == 4) totalHours += (exc.pse__Thursday_Hours__c  == null ? 0 : exc.pse__Thursday_Hours__c);
+                if (dow == 5) totalHours += (exc.pse__Friday_Hours__c    == null ? 0 : exc.pse__Friday_Hours__c);
+                if (dow == 6) totalHours += (exc.pse__Saturday_Hours__c  == null ? 0 : exc.pse__Saturday_Hours__c);
+                if (dow == 7) totalHours += (exc.pse__Sunday_Hours__c    == null ? 0 : exc.pse__Sunday_Hours__c);
+            }
+        }
+        System.assertEquals(input.numberOfHours, totalHours, 'Total assigned hours must equal numberOfHours for 6-day workweek');
     }
 
     @isTest
