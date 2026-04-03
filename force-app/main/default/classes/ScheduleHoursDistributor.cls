@@ -171,13 +171,13 @@ public with sharing class ScheduleHoursDistributor {
         };
 
         Integer cat1UsableDays = (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd)
-            ? countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits) : 0;
+            ? countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits, input.numberOfWorkDays) : 0;
         Integer cat2UsableDays = (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd)
-            ? countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits) : 0;
+            ? countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits, input.numberOfWorkDays) : 0;
         Integer cat3UsableDays = (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd)
-            ? countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits) : 0;
+            ? countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits, input.numberOfWorkDays) : 0;
         Integer postUsableDays = (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd)
-            ? countUsableWorkdays(postActualStart, postActualEnd, allSplits) : 0;
+            ? countUsableWorkdays(postActualStart, postActualEnd, allSplits, input.numberOfWorkDays) : 0;
 
         Map<String, Decimal> hoursPerDayMap = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
         List<String> usableCats = new List<String>();
@@ -348,17 +348,18 @@ public with sharing class ScheduleHoursDistributor {
         }
     }
 
-    // Helper: Counts usable workdays (Mon-Fri) between two dates, excluding holidays and onsite gap days
-    public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates) {
+    // Helper: Counts usable working days between two dates, excluding holidays and onsite gap days.
+    // The set of days considered "working" is determined by workDays (see isWorkingDay).
+    public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates, Integer workDays) {
         Integer count = 0;
         for (Date d = start; d <= endDate; d = d.addDays(1)) {
-            Boolean weekday = isWeekday(d);
+            Boolean workingDay = isWorkingDay(d, workDays);
             Boolean excluded = excludeDates.contains(d);
-            if (weekday && !excluded) {
+            if (workingDay && !excluded) {
                 count++;
             }
             if (DEBUG) {
-                System.debug('countUsableWorkdays: date=' + d + ', isWeekday=' + weekday + ', isExcluded=' + excluded + ', runningCount=' + count);
+                System.debug('countUsableWorkdays: date=' + d + ', isWorkingDay=' + workingDay + ', isExcluded=' + excluded + ', runningCount=' + count);
             }
         }
         if (DEBUG) {
@@ -367,10 +368,18 @@ public with sharing class ScheduleHoursDistributor {
         return count;
     }
 
+    // Helper: Returns true if the date falls on a working day for the given numberOfWorkDays setting.
+    // workDays <= 5 → Mon–Fri; workDays == 6 → Mon–Sat; workDays == 7 → all days.
+    public static Boolean isWorkingDay(Date d, Integer workDays) {
+        Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Monday, 7=Sunday
+        if (workDays >= 7) return true;
+        if (workDays >= 6) return dow >= 1 && dow <= 6; // Mon–Sat
+        return dow >= 1 && dow <= 5; // Mon–Fri (default)
+    }
+
     // Helper: Returns true if the date is a weekday (Mon-Fri)
     public static Boolean isWeekday(Date d) {
-        Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Monday, 7=Sunday
-        return dow >= 1 && dow <= 5;
+        return isWorkingDay(d, 5);
     }
 
 
