@@ -606,4 +606,93 @@ public class ScheduleHoursDistributorTest {
         System.assert(results[0].scheduleExceptions.size() >= 0);
         System.assert(results[1].scheduleExceptions.size() >= 0);
     }
+
+    @isTest
+    static void testCategoryMetadataFieldsPopulated() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 1, 1);
+        input.endDate = Date.newInstance(2025, 7, 1);
+        input.numberOfHours = 200;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 11;
+        input.cat2Weeks = 8;
+        input.cat3Weeks = 6;
+        input.postWeeks = 4;
+        input.cat1Percentage = 25;
+        input.cat2Percentage = 30;
+        input.cat3Percentage = 40;
+        input.postPercentage = 5;
+        input.onsiteStartDate = Date.newInstance(2025, 3, 1);
+        input.onsiteEndDate = Date.newInstance(2025, 3, 14);
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> results =
+            ScheduleHoursDistributor.generateCategoryScheduleExceptions(
+                new List<ScheduleHoursDistributor.ScheduleInput>{ input }
+            );
+
+        System.assertEquals(1, results.size());
+        ScheduleHoursDistributor.ScheduleExceptionOutputWrapper w = results[0];
+        System.assertEquals(null, w.errorMessage, 'No error expected');
+
+        // cat1 is valid for this input — verify metadata fields are set
+        System.assertNotEquals(null, w.cat1Start, 'cat1Start should be populated');
+        System.assertNotEquals(null, w.cat1End, 'cat1End should be populated');
+        System.assertNotEquals(null, w.cat1HoursPerDay, 'cat1HoursPerDay should be populated');
+        System.assertNotEquals(null, w.cat1UsableDays, 'cat1UsableDays should be populated');
+        System.assert(w.cat1UsableDays > 0, 'cat1UsableDays should be greater than zero');
+        System.assert(w.cat1HoursPerDay > 0, 'cat1HoursPerDay should be greater than zero');
+        System.assert(w.cat1Start <= w.cat1End, 'cat1Start should be on or before cat1End');
+
+        // cat2 metadata
+        System.assertNotEquals(null, w.cat2Start, 'cat2Start should be populated');
+        System.assertNotEquals(null, w.cat2End, 'cat2End should be populated');
+        System.assertNotEquals(null, w.cat2HoursPerDay, 'cat2HoursPerDay should be populated');
+        System.assertNotEquals(null, w.cat2UsableDays, 'cat2UsableDays should be populated');
+
+        // cat3 metadata
+        System.assertNotEquals(null, w.cat3Start, 'cat3Start should be populated');
+        System.assertNotEquals(null, w.cat3End, 'cat3End should be populated');
+        System.assertNotEquals(null, w.cat3HoursPerDay, 'cat3HoursPerDay should be populated');
+        System.assertNotEquals(null, w.cat3UsableDays, 'cat3UsableDays should be populated');
+
+        // post metadata — postValid requires onsite, which is set above
+        System.assertNotEquals(null, w.postStart, 'postStart should be populated');
+        System.assertNotEquals(null, w.postEnd, 'postEnd should be populated');
+        System.assertNotEquals(null, w.postHoursPerDay, 'postHoursPerDay should be populated');
+        System.assertNotEquals(null, w.postUsableDays, 'postUsableDays should be populated');
+    }
+
+    @isTest
+    static void testCategoryMetadataFieldsNullOnError() {
+        // When the invocable returns an error, metadata fields should remain null
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = null; // triggers error
+        input.startDate = Date.newInstance(2025, 1, 1);
+        input.endDate = Date.newInstance(2025, 7, 1);
+        input.numberOfHours = 200;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 4; input.cat2Weeks = 4; input.cat3Weeks = 4; input.postWeeks = 4;
+        input.cat1Percentage = 25; input.cat2Percentage = 25; input.cat3Percentage = 25; input.postPercentage = 25;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> results =
+            ScheduleHoursDistributor.generateCategoryScheduleExceptions(
+                new List<ScheduleHoursDistributor.ScheduleInput>{ input }
+            );
+
+        System.assertEquals(1, results.size());
+        ScheduleHoursDistributor.ScheduleExceptionOutputWrapper w = results[0];
+        System.assertNotEquals(null, w.errorMessage, 'Error message should be set');
+        System.assertEquals(null, w.cat1Start, 'cat1Start should be null on error');
+        System.assertEquals(null, w.cat1End, 'cat1End should be null on error');
+        System.assertEquals(null, w.cat1HoursPerDay, 'cat1HoursPerDay should be null on error');
+        System.assertEquals(null, w.cat1UsableDays, 'cat1UsableDays should be null on error');
+        System.assertEquals(null, w.cat2Start, 'cat2Start should be null on error');
+        System.assertEquals(null, w.cat3Start, 'cat3Start should be null on error');
+        System.assertEquals(null, w.postStart, 'postStart should be null on error');
+    }
 }

@@ -274,7 +274,24 @@ public with sharing class ScheduleHoursDistributor {
             }
         }
 
-        return new ScheduleExceptionOutputWrapper(allExceptions, null);
+        ScheduleExceptionOutputWrapper wrapper = new ScheduleExceptionOutputWrapper(allExceptions, null);
+        wrapper.cat1Start = cat1ActualStart;
+        wrapper.cat1End = cat1ActualEnd;
+        wrapper.cat1HoursPerDay = cat1HoursPerDay;
+        wrapper.cat1UsableDays = cat1UsableDays;
+        wrapper.cat2Start = cat2ActualStart;
+        wrapper.cat2End = cat2ActualEnd;
+        wrapper.cat2HoursPerDay = cat2HoursPerDay;
+        wrapper.cat2UsableDays = cat2UsableDays;
+        wrapper.cat3Start = cat3ActualStart;
+        wrapper.cat3End = cat3ActualEnd;
+        wrapper.cat3HoursPerDay = cat3HoursPerDay;
+        wrapper.cat3UsableDays = cat3UsableDays;
+        wrapper.postStart = postActualStart;
+        wrapper.postEnd = postActualEnd;
+        wrapper.postHoursPerDay = postHoursPerDay;
+        wrapper.postUsableDays = postUsableDays;
+        return wrapper;
     }
 
     // Helper: create a single error wrapper
@@ -377,6 +394,54 @@ public with sharing class ScheduleHoursDistributor {
 
         @InvocableVariable(label='Error Message' description='Error encountered during execution')
         public String errorMessage;
+
+        @InvocableVariable(label='Category 1 Start' description='Actual start date computed for Category 1')
+        public Date cat1Start;
+
+        @InvocableVariable(label='Category 1 End' description='Actual end date computed for Category 1')
+        public Date cat1End;
+
+        @InvocableVariable(label='Category 1 Hours Per Day' description='Computed hours per day for Category 1')
+        public Decimal cat1HoursPerDay;
+
+        @InvocableVariable(label='Category 1 Usable Days' description='Number of usable workdays in Category 1')
+        public Integer cat1UsableDays;
+
+        @InvocableVariable(label='Category 2 Start' description='Actual start date computed for Category 2')
+        public Date cat2Start;
+
+        @InvocableVariable(label='Category 2 End' description='Actual end date computed for Category 2')
+        public Date cat2End;
+
+        @InvocableVariable(label='Category 2 Hours Per Day' description='Computed hours per day for Category 2')
+        public Decimal cat2HoursPerDay;
+
+        @InvocableVariable(label='Category 2 Usable Days' description='Number of usable workdays in Category 2')
+        public Integer cat2UsableDays;
+
+        @InvocableVariable(label='Category 3 Start' description='Actual start date computed for Category 3')
+        public Date cat3Start;
+
+        @InvocableVariable(label='Category 3 End' description='Actual end date computed for Category 3')
+        public Date cat3End;
+
+        @InvocableVariable(label='Category 3 Hours Per Day' description='Computed hours per day for Category 3')
+        public Decimal cat3HoursPerDay;
+
+        @InvocableVariable(label='Category 3 Usable Days' description='Number of usable workdays in Category 3')
+        public Integer cat3UsableDays;
+
+        @InvocableVariable(label='Post Start' description='Actual start date computed for Post category')
+        public Date postStart;
+
+        @InvocableVariable(label='Post End' description='Actual end date computed for Post category')
+        public Date postEnd;
+
+        @InvocableVariable(label='Post Hours Per Day' description='Computed hours per day for Post category')
+        public Decimal postHoursPerDay;
+
+        @InvocableVariable(label='Post Usable Days' description='Number of usable workdays in Post category')
+        public Integer postUsableDays;
 
         public ScheduleExceptionOutputWrapper(
             List<pse__Schedule_Exception__c> exceptions,
