@@ -31,7 +31,8 @@ The overall goal is to replace manual schedule exception entry with consistent, 
 
 4. **Onsite Logic (Optional)**
    - If an onsite period is detected (< 30 days and within the schedule range):
-     - A full Monday–Sunday onsite gap week is reserved.
+   - A Monday–Sunday onsite gap week is calculated.
+   - The generated onsite gap exception is clamped to the input schedule range.
      - The gap week receives a zero-hour schedule exception.
      - All category allocations exclude the onsite gap.
      - The Post category is created only when onsite is valid.
@@ -145,7 +146,8 @@ Onsite is considered valid only if:
 - Fully contained within the schedule range
 
 ### Onsite Gap Week
-- A full **Monday–Sunday onsite gap week** is reserved
+- A **Monday–Sunday onsite gap week** is calculated
+- The generated onsite gap exception is **clamped to the input schedule window** (`startDate` to `endDate`)
 - The gap week generates a **zero-hour schedule exception**
 - All category allocations **exclude onsite gap days**
 - The **Post** category begins **after the onsite gap week ends**
@@ -204,5 +206,6 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testAllCategoriesInvalid_NoCrash` | Zero-week categories produce no exceptions without throwing an error |
 | `testGenerateScheduleExceptions_MultipleValidInputs` | Batch processing of two valid inputs returns two wrappers |
 | `testGenerateScheduleExceptions_MixedValidAndInvalidInputs` | Batch processing of valid + invalid input returns one success and one error |
+| `testOnsiteGapClampedToInputDateRange` | Onsite gap exception and all generated exceptions remain within input start/end boundaries |
 | `testGenerateScheduleExceptions_TwoValidInputs_NoErrors` | Two valid inputs both return wrappers with no errors |
 

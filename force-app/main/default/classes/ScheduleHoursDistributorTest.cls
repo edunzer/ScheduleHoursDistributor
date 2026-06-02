@@ -572,6 +572,101 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testOnsiteGapClampedToInputDateRange() {
+        pse__Schedule__c schedule = new pse__Schedule__c(
+            pse__Start_Date__c = Date.newInstance(2026, 6, 1),
+            pse__End_Date__c = Date.newInstance(2026, 10, 10),
+            pse__Scheduled_Hours__c = 20,
+            pse__Monday_Hours__c = 8,
+            pse__Tuesday_Hours__c = 8,
+            pse__Wednesday_Hours__c = 8,
+            pse__Thursday_Hours__c = 8,
+            pse__Friday_Hours__c = 8,
+            pse__Saturday_Hours__c = 0,
+            pse__Sunday_Hours__c = 0
+        );
+        insert schedule;
+
+        List<pse__Schedule_Exception__c> holidays = new List<pse__Schedule_Exception__c>{
+            new pse__Schedule_Exception__c(
+                pse__Schedule__c = schedule.Id,
+                pse__Date__c = Date.newInstance(2026, 6, 19),
+                pse__End_Date__c = Date.newInstance(2026, 6, 19),
+                pse__Monday_Hours__c = 0, pse__Tuesday_Hours__c = 0, pse__Wednesday_Hours__c = 0, pse__Thursday_Hours__c = 0, pse__Friday_Hours__c = 0, pse__Saturday_Hours__c = 0, pse__Sunday_Hours__c = 0
+            ),
+            new pse__Schedule_Exception__c(
+                pse__Schedule__c = schedule.Id,
+                pse__Date__c = Date.newInstance(2026, 7, 2),
+                pse__End_Date__c = Date.newInstance(2026, 7, 2),
+                pse__Monday_Hours__c = 0, pse__Tuesday_Hours__c = 0, pse__Wednesday_Hours__c = 0, pse__Thursday_Hours__c = 0, pse__Friday_Hours__c = 0, pse__Saturday_Hours__c = 0, pse__Sunday_Hours__c = 0
+            ),
+            new pse__Schedule_Exception__c(
+                pse__Schedule__c = schedule.Id,
+                pse__Date__c = Date.newInstance(2026, 7, 3),
+                pse__End_Date__c = Date.newInstance(2026, 7, 3),
+                pse__Monday_Hours__c = 0, pse__Tuesday_Hours__c = 0, pse__Wednesday_Hours__c = 0, pse__Thursday_Hours__c = 0, pse__Friday_Hours__c = 0, pse__Saturday_Hours__c = 0, pse__Sunday_Hours__c = 0
+            ),
+            new pse__Schedule_Exception__c(
+                pse__Schedule__c = schedule.Id,
+                pse__Date__c = Date.newInstance(2026, 9, 4),
+                pse__End_Date__c = Date.newInstance(2026, 9, 4),
+                pse__Monday_Hours__c = 0, pse__Tuesday_Hours__c = 0, pse__Wednesday_Hours__c = 0, pse__Thursday_Hours__c = 0, pse__Friday_Hours__c = 0, pse__Saturday_Hours__c = 0, pse__Sunday_Hours__c = 0
+            ),
+            new pse__Schedule_Exception__c(
+                pse__Schedule__c = schedule.Id,
+                pse__Date__c = Date.newInstance(2026, 9, 7),
+                pse__End_Date__c = Date.newInstance(2026, 9, 7),
+                pse__Monday_Hours__c = 0, pse__Tuesday_Hours__c = 0, pse__Wednesday_Hours__c = 0, pse__Thursday_Hours__c = 0, pse__Friday_Hours__c = 0, pse__Saturday_Hours__c = 0, pse__Sunday_Hours__c = 0
+            )
+        };
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2026, 6, 1);
+        input.endDate = Date.newInstance(2026, 10, 10);
+        input.numberOfHours = 20;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 10;
+        input.cat2Weeks = 4;
+        input.cat3Weeks = 6;
+        input.postWeeks = 6;
+        input.cat1Percentage = 20;
+        input.cat2Percentage = 20;
+        input.cat3Percentage = 50;
+        input.postPercentage = 10;
+        input.onsiteStartDate = Date.newInstance(2026, 10, 5);
+        input.onsiteEndDate = Date.newInstance(2026, 10, 8);
+        input.existingExceptions = holidays;
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result =
+            ScheduleHoursDistributor.generateCategoryScheduleExceptions(
+                new List<ScheduleHoursDistributor.ScheduleInput>{ input }
+            );
+
+        System.assertEquals(1, result.size(), 'Should return one result');
+        System.assertEquals(null, result[0].errorMessage, 'Should not return an error');
+
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            Date excStart = exc.pse__Date__c;
+            Date excEnd = (exc.pse__End_Date__c == null) ? excStart : exc.pse__End_Date__c;
+            System.assert(excStart >= input.startDate, 'Generated exception starts before the input start date');
+            System.assert(excEnd <= input.endDate, 'Generated exception ends after the input end date');
+        }
+
+        Boolean foundOnsiteGap = false;
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            if (exc.pse__Date__c == Date.newInstance(2026, 10, 5)) {
+                Date excEnd = (exc.pse__End_Date__c == null) ? exc.pse__Date__c : exc.pse__End_Date__c;
+                if (excEnd == Date.newInstance(2026, 10, 10)) {
+                    foundOnsiteGap = true;
+                    break;
+                }
+            }
+        }
+        System.assertEquals(true, foundOnsiteGap, 'Onsite gap should be clamped to end on 2026-10-10');
+    }
+
+    @isTest
     static void testGenerateScheduleExceptions_TwoValidInputs_NoErrors() {
         // Use the two schedules from test setup
         List<pse__Schedule__c> schedules = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c ORDER BY Id LIMIT 2];
