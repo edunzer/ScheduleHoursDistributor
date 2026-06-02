@@ -149,10 +149,14 @@ public with sharing class ScheduleHoursDistributor {
         excludeDates.addAll(holidayDates);
 
         if (onsiteNeeded && onsiteGapWeekStart != null && onsiteGapWeekEnd != null) {
-            addSplitExceptions(
-                onsiteGapWeekStart, onsiteGapWeekEnd, 0, input.numberOfWorkDays, input.scheduleId,
-                input.startDate, input.endDate, holidayDates, allExceptions, new List<pse__Schedule_Exception__c>()
-            );
+            Date onsiteSegmentStart = (onsiteGapWeekStart < input.startDate) ? input.startDate : onsiteGapWeekStart;
+            Date onsiteSegmentEnd = (onsiteGapWeekEnd > input.endDate) ? input.endDate : onsiteGapWeekEnd;
+            if (onsiteSegmentStart <= onsiteSegmentEnd) {
+                addSplitExceptions(
+                    onsiteSegmentStart, onsiteSegmentEnd, 0, input.numberOfWorkDays, input.scheduleId,
+                    input.startDate, input.endDate, holidayDates, allExceptions, new List<pse__Schedule_Exception__c>()
+                );
+            }
         }
 
         Set<Date> allSplits = new Set<Date>();
