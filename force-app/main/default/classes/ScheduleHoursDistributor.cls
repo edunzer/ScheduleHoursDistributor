@@ -171,13 +171,13 @@ public with sharing class ScheduleHoursDistributor {
         };
 
         Integer cat1UsableDays = (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd)
-            ? countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits) : 0;
+            ? countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits, input.numberOfWorkDays) : 0;
         Integer cat2UsableDays = (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd)
-            ? countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits) : 0;
+            ? countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits, input.numberOfWorkDays) : 0;
         Integer cat3UsableDays = (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd)
-            ? countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits) : 0;
+            ? countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits, input.numberOfWorkDays) : 0;
         Integer postUsableDays = (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd)
-            ? countUsableWorkdays(postActualStart, postActualEnd, allSplits) : 0;
+            ? countUsableWorkdays(postActualStart, postActualEnd, allSplits, input.numberOfWorkDays) : 0;
 
         Map<String, Decimal> hoursPerDayMap = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
         List<String> usableCats = new List<String>();
@@ -348,23 +348,42 @@ public with sharing class ScheduleHoursDistributor {
         }
     }
 
-    // Helper: Counts usable workdays (Mon-Fri) between two dates, excluding holidays and onsite gap days
-    public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates) {
+    // Helper: Counts usable workdays between two dates, excluding holidays and onsite gap days.
+    // Workday pattern follows numberOfWorkDays: 1=Mon only ... 5=Mon-Fri, 6=Mon-Sat, 7=Mon-Sun.
+    public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates, Integer numberOfWorkDays) {
+        Integer boundedWorkDays = numberOfWorkDays == null ? 5 : numberOfWorkDays;
+        if (boundedWorkDays < 1) boundedWorkDays = 1;
+        if (boundedWorkDays > 7) boundedWorkDays = 7;
+
         Integer count = 0;
         for (Date d = start; d <= endDate; d = d.addDays(1)) {
-            Boolean weekday = isWeekday(d);
+            Boolean scheduledWorkday = isScheduledWorkday(d, boundedWorkDays);
             Boolean excluded = excludeDates.contains(d);
-            if (weekday && !excluded) {
+            if (scheduledWorkday && !excluded) {
                 count++;
             }
             if (DEBUG) {
-                System.debug('countUsableWorkdays: date=' + d + ', isWeekday=' + weekday + ', isExcluded=' + excluded + ', runningCount=' + count);
+                System.debug('countUsableWorkdays: date=' + d + ', isScheduledWorkday=' + scheduledWorkday + ', isExcluded=' + excluded + ', runningCount=' + count + ', numberOfWorkDays=' + boundedWorkDays);
             }
         }
         if (DEBUG) {
-            System.debug('countUsableWorkdays: FINAL count for range ' + start + ' to ' + endDate + ' (excludes=' + excludeDates + ') = ' + count);
+            System.debug('countUsableWorkdays: FINAL count for range ' + start + ' to ' + endDate + ' (excludes=' + excludeDates + ', numberOfWorkDays=' + boundedWorkDays + ') = ' + count);
         }
         return count;
+    }
+
+    // Backward-compatible overload defaults to Mon-Fri behavior.
+    public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates) {
+        return countUsableWorkdays(start, endDate, excludeDates, 5);
+    }
+
+    // Helper: Returns true if date is one of the configured workdays for the week.
+    public static Boolean isScheduledWorkday(Date d, Integer numberOfWorkDays) {
+        Integer boundedWorkDays = numberOfWorkDays == null ? 5 : numberOfWorkDays;
+        if (boundedWorkDays < 1) boundedWorkDays = 1;
+        if (boundedWorkDays > 7) boundedWorkDays = 7;
+        Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Monday, 7=Sunday
+        return dow >= 1 && dow <= boundedWorkDays;
     }
 
     // Helper: Returns true if the date is a weekday (Mon-Fri)
