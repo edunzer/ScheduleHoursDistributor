@@ -49,7 +49,8 @@ The overall goal is to replace manual schedule exception entry with consistent, 
    - Any unused or excess percentage is redistributed evenly.
 
 7. **Hour Distribution**
-   - Usable weekdays (Mon–Fri) are counted per category.
+   - Usable days are counted per category using `numberOfWorkDays`.
+   - Workday patterns are: `1 = Mon`, `5 = Mon–Fri`, `6 = Mon–Sat`, `7 = Mon–Sun`.
    - Holidays and onsite gap days are excluded.
    - Daily hours are calculated based on category percentage and usable days.
 
@@ -130,10 +131,11 @@ The method returns one wrapper per input containing:
 
 ## Hour Allocation Rules
 
-- Hours are assigned only to **weekdays (Monday–Friday)**
+- Hours are assigned to the first `numberOfWorkDays` days of each week (for example: `5 = Mon–Fri`, `7 = Mon–Sun`)
+- Usable-day counting uses the same `numberOfWorkDays` pattern as hour assignment
 - Holidays and onsite gap days are **always excluded**
 - Category percentages are **normalized** so valid categories total **100%**
-- Daily hours are calculated using **usable workdays only**
+- Daily hours are calculated using usable workdays only
 - A **rounding correction** is applied to the last generated exception to ensure the total assigned hours exactly match `numberOfHours`
 
 ---
@@ -167,8 +169,14 @@ Creates and returns a single `pse__Schedule_Exception__c` record with per-day ho
 ### `addSplitExceptions(Date segStart, Date segEnd, Decimal hoursPerDay, Integer workDays, Id scheduleId, Date inputStart, Date inputEnd, Set<Date> allSplits, List<pse__Schedule_Exception__c> allExceptions, List<pse__Schedule_Exception__c> catList)`
 Iterates a date range and splits it into contiguous segments at every holiday and onsite gap date. Each uninterrupted segment is created as a separate `pse__Schedule_Exception__c` record added to both `allExceptions` and `catList`.
 
+### `countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates, Integer numberOfWorkDays)`
+Counts usable days between two dates based on `numberOfWorkDays` (1-7), excluding any dates in `excludeDates` (holidays and onsite gap days).
+
 ### `countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates)`
-Counts the number of weekdays (Mon–Fri) between two dates, excluding any dates in `excludeDates` (holidays and onsite gap days).
+Backward-compatible overload that defaults to `5` (Mon–Fri).
+
+### `isScheduledWorkday(Date d, Integer numberOfWorkDays)`
+Returns `true` when a date falls within the configured weekly work pattern (`1 = Mon` through `7 = Mon–Sun`).
 
 ### `isWeekday(Date d)`
 Returns `true` if the given date falls on Monday through Friday.
@@ -202,7 +210,7 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testMathWithExistingHolidayExcludesDate_TotalHoursMatch` | Holiday dates are excluded and total hours still match |
 | `testExtractHolidayDates_NullAndRanges` | `extractHolidayDates` handles null entries, single-day, and multi-day exceptions |
 | `testAddSplitExceptions_SplittingBehavior` | `addSplitExceptions` correctly splits segments at split dates |
-| `testCountUsableWorkdays_VariousRanges` | `countUsableWorkdays` counts correctly with weekends and excluded dates |
+| `testCountUsableWorkdays_VariousRanges` | `countUsableWorkdays` counts correctly for 3-day, 6-day, and 7-day schedules, including exclusions |
 | `testAllCategoriesInvalid_NoCrash` | Zero-week categories produce no exceptions without throwing an error |
 | `testGenerateScheduleExceptions_MultipleValidInputs` | Batch processing of two valid inputs returns two wrappers |
 | `testGenerateScheduleExceptions_MixedValidAndInvalidInputs` | Batch processing of valid + invalid input returns one success and one error |
