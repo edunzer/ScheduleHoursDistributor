@@ -476,6 +476,25 @@ public class ScheduleHoursDistributorTest {
             if (ScheduleHoursDistributor.isWeekday(d) && !exclAll.contains(d)) expected++;
         }
         System.assertEquals(expected, cnt);
+
+        // Explicit workday patterns: 6-day should include Saturday, exclude Sunday
+        Date cStart = Date.newInstance(2025,1,6); // Monday
+        Date cEnd = Date.newInstance(2025,1,12);  // Sunday
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(cStart, cEnd, new Set<Date>(), 6);
+        System.assertEquals(6, cnt, '6-day schedule should count Mon-Sat as usable days');
+
+        // Explicit workday patterns: 7-day should include whole week
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(cStart, cEnd, new Set<Date>(), 7);
+        System.assertEquals(7, cnt, '7-day schedule should count Mon-Sun as usable days');
+
+        // Explicit workday patterns: 3-day should count Mon-Wed only
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(cStart, cEnd, new Set<Date>(), 3);
+        System.assertEquals(3, cnt, '3-day schedule should count Mon-Wed as usable days');
+
+        // Exclusions still apply in weekend-enabled mode
+        Set<Date> exclWeekendEnabled = new Set<Date>{ Date.newInstance(2025,1,11) }; // Sunday
+        cnt = ScheduleHoursDistributor.countUsableWorkdays(cStart, cEnd, exclWeekendEnabled, 7);
+        System.assertEquals(6, cnt, 'Excluded dates should be removed even in 7-day mode');
     }
 
     @isTest
