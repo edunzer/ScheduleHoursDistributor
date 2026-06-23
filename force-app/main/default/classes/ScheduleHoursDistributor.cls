@@ -2,6 +2,8 @@ public with sharing class ScheduleHoursDistributor {
     private static final Boolean DEBUG = false;
     private static final Decimal MAX_HOURS_PER_DAY = 24;
     private static final Integer MAX_REDISTRIBUTION_PASSES = 4;
+    // Runtime-context day index for a known Monday date.
+    private static final Integer LOCALE_MONDAY_INDEX = deriveLocaleMondayIndex();
 
     @InvocableMethod(label='Generate Category Schedule Exceptions' description='Generates schedule exception records for a category, skipping holidays.')
     public static List<ScheduleExceptionOutputWrapper> generateCategoryScheduleExceptions(List<ScheduleInput> inputList) {
@@ -56,8 +58,8 @@ public with sharing class ScheduleHoursDistributor {
         Date onsiteGapWeekStart = null;
         Date onsiteGapWeekEnd = null;
         if (onsiteNeeded) {
-            Integer dayOfWeek = input.onsiteStartDate.toStartOfWeek().daysBetween(input.onsiteStartDate) + 1;
-            Integer daysToMonday = (dayOfWeek == 1) ? -6 : 2 - dayOfWeek;
+            Integer dayOfWeek = getNormalizedDayOfWeek(input.onsiteStartDate); // Monday=1 ... Sunday=7
+            Integer daysToMonday = 1 - dayOfWeek;
             onsiteGapWeekStart = input.onsiteStartDate.addDays(daysToMonday);
             onsiteGapWeekEnd = onsiteGapWeekStart.addDays(6);
             for (Date d = onsiteGapWeekStart; d <= onsiteGapWeekEnd; d = d.addDays(1)) {
@@ -392,18 +394,32 @@ public with sharing class ScheduleHoursDistributor {
         return countUsableWorkdays(start, endDate, excludeDates, 5);
     }
 
+    // Helper: Returns normalized day-of-week where Monday=1 and Sunday=7.
+    public static Integer getNormalizedDayOfWeek(Date d) {
+        // Normalize locale/context-dependent weekday numbering to Monday=1 ... Sunday=7.
+        Integer localeDow = d.toStartOfWeek().daysBetween(d) + 1;
+        Integer normalized = Math.mod(localeDow - LOCALE_MONDAY_INDEX + 7, 7) + 1;
+        return normalized;
+    }
+
+    // Helper: Derives the runtime/context locale index for a known Monday date.
+    private static Integer deriveLocaleMondayIndex() {
+        Date knownMonday = Date.newInstance(2024, 1, 1); // Monday
+        return knownMonday.toStartOfWeek().daysBetween(knownMonday) + 1;
+    }
+
     // Helper: Returns true if date is one of the configured workdays for the week.
     public static Boolean isScheduledWorkday(Date d, Integer numberOfWorkDays) {
         Integer boundedWorkDays = numberOfWorkDays == null ? 5 : numberOfWorkDays;
         if (boundedWorkDays < 1) boundedWorkDays = 1;
         if (boundedWorkDays > 7) boundedWorkDays = 7;
-        Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Monday, 7=Sunday
+        Integer dow = getNormalizedDayOfWeek(d); // 1=Monday, 7=Sunday
         return dow >= 1 && dow <= boundedWorkDays;
     }
 
     // Helper: Returns true if the date is a weekday (Mon-Fri)
     public static Boolean isWeekday(Date d) {
-        Integer dow = d.toStartOfWeek().daysBetween(d) + 1; // 1=Monday, 7=Sunday
+        Integer dow = getNormalizedDayOfWeek(d); // 1=Monday, 7=Sunday
         return dow >= 1 && dow <= 5;
     }
 
