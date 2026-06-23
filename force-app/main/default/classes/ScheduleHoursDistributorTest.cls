@@ -252,6 +252,8 @@ public class ScheduleHoursDistributorTest {
                     // All per-day hours should be zero for the onsite gap week
                     Boolean allZero = (exc.pse__Monday_Hours__c == 0 && exc.pse__Tuesday_Hours__c == 0 && exc.pse__Wednesday_Hours__c == 0 && exc.pse__Thursday_Hours__c == 0 && exc.pse__Friday_Hours__c == 0 && exc.pse__Saturday_Hours__c == 0 && exc.pse__Sunday_Hours__c == 0);
                     if (allZero) {
+                        System.assertEquals(Date.newInstance(2025, 3, 3), exc.pse__Date__c, 'Onsite gap week should start on Monday of onsite start week');
+                        System.assertEquals(Date.newInstance(2025, 3, 9), exc.pse__End_Date__c, 'Onsite gap week should end on Sunday of onsite start week');
                         foundWeekGap = true;
                         break;
                     }
@@ -259,6 +261,17 @@ public class ScheduleHoursDistributorTest {
             }
         }
         System.assertEquals(true, foundWeekGap, 'Should find a 7-day onsite gap exception with zero hours');
+    }
+
+    @isTest
+    static void testGetNormalizedDayOfWeek_MondayIsOne() {
+        System.assertEquals(1, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 3)), 'Monday should be 1');
+        System.assertEquals(2, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 4)), 'Tuesday should be 2');
+        System.assertEquals(3, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 5)), 'Wednesday should be 3');
+        System.assertEquals(4, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 6)), 'Thursday should be 4');
+        System.assertEquals(5, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 7)), 'Friday should be 5');
+        System.assertEquals(6, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 8)), 'Saturday should be 6');
+        System.assertEquals(7, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 9)), 'Sunday should be 7');
     }
 
     @isTest
