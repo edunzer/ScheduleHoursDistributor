@@ -1,5 +1,7 @@
 public with sharing class ScheduleHoursDistributor {
     private static final Boolean DEBUG = false;
+    private static final Decimal MAX_HOURS_PER_DAY = 24;
+    private static final Integer MAX_REDISTRIBUTION_PASSES = 4;
 
     @InvocableMethod(label='Generate Category Schedule Exceptions' description='Generates schedule exception records for a category, skipping holidays.')
     public static List<ScheduleExceptionOutputWrapper> generateCategoryScheduleExceptions(List<ScheduleInput> inputList) {
@@ -182,34 +184,86 @@ public with sharing class ScheduleHoursDistributor {
         Map<String, Decimal> hoursPerDayMap = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
         List<String> usableCats = new List<String>();
         Map<String, Integer> usableDaysMap = new Map<String, Integer>{'cat1' => cat1UsableDays, 'cat2' => cat2UsableDays, 'cat3' => cat3UsableDays, 'post' => postUsableDays};
-        Map<String, Decimal> totalHoursMap = new Map<String, Decimal>{
-            'cat1' => (cat1Pct == null ? 0 : (cat1Pct/100) * input.numberOfHours),
-            'cat2' => (cat2Pct == null ? 0 : (cat2Pct/100) * input.numberOfHours),
-            'cat3' => (cat3Pct == null ? 0 : (cat3Pct/100) * input.numberOfHours),
-            'post' => (postPct == null ? 0 : (postPct/100) * input.numberOfHours)
+        Map<String, Decimal> pctByCat = new Map<String, Decimal>{
+            'cat1' => (cat1Pct == null ? 0 : cat1Pct),
+            'cat2' => (cat2Pct == null ? 0 : cat2Pct),
+            'cat3' => (cat3Pct == null ? 0 : cat3Pct),
+            'post' => (postPct == null ? 0 : postPct)
         };
+        Map<String, Decimal> effectivePctByCat = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
 
         if (cat1UsableDays > 0) usableCats.add('cat1');
         if (cat2UsableDays > 0) usableCats.add('cat2');
         if (cat3UsableDays > 0) usableCats.add('cat3');
         if (postUsableDays > 0) usableCats.add('post');
 
-        Decimal assignedSum = 0;
-        Integer lastIdx = usableCats.size() - 1;
-        for (Integer i = 0; i < usableCats.size(); i++) {
-            String cat = usableCats[i];
+        Map<String, Decimal> capacityByCat = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
+        Map<String, Decimal> allocatedByCat = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
+        Map<String, Decimal> freeCapacityByCat = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
+
+        Decimal sumUsablePct = 0;
+        for (String cat : usableCats) {
             Integer uDays = usableDaysMap.get(cat);
-            Decimal totalHours = totalHoursMap.get(cat);
-            if (i < lastIdx) {
-                Decimal hpd = (uDays > 0) ? (totalHours / uDays).setScale(2, System.RoundingMode.HALF_UP) : 0;
-                hoursPerDayMap.put(cat, hpd);
-                assignedSum += hpd * uDays;
-            } else {
-                Decimal remaining = input.numberOfHours - assignedSum;
-                Decimal hpd = (uDays > 0) ? (remaining / uDays).setScale(2, System.RoundingMode.HALF_UP) : 0;
-                hoursPerDayMap.put(cat, hpd);
-                assignedSum += hpd * uDays;
+            Decimal capacity = (uDays == null || uDays <= 0) ? 0 : (uDays * MAX_HOURS_PER_DAY);
+            capacityByCat.put(cat, capacity);
+            freeCapacityByCat.put(cat, capacity);
+            Decimal rawPct = pctByCat.get(cat) == null ? 0 : pctByCat.get(cat);
+            Decimal boundedPct = rawPct < 0 ? 0 : rawPct;
+            effectivePctByCat.put(cat, boundedPct);
+            sumUsablePct += boundedPct;
+        }
+
+        Decimal overflowHours = input.numberOfHours == null ? 0 : input.numberOfHours;
+
+        // First pass: assign by normalized percentage across categories that have usable days, capped by per-category capacity.
+        for (String cat : usableCats) {
+            Decimal pct = effectivePctByCat.get(cat) == null ? 0 : effectivePctByCat.get(cat);
+            Decimal target = sumUsablePct > 0 ? (input.numberOfHours * (pct / sumUsablePct)) : 0;
+            Decimal capacity = capacityByCat.get(cat);
+            Decimal assigned = target <= capacity ? target : capacity;
+            allocatedByCat.put(cat, assigned);
+            freeCapacityByCat.put(cat, capacity - assigned);
+            overflowHours -= assigned;
+        }
+
+        // Additional passes: roll overflow into categories with remaining capacity.
+        Integer passes = 0;
+        while (overflowHours > 0 && passes < MAX_REDISTRIBUTION_PASSES) {
+            Decimal totalFree = 0;
+            for (String cat : usableCats) {
+                Decimal free = freeCapacityByCat.get(cat);
+                if (free > 0) totalFree += free;
             }
+            if (totalFree <= 0) {
+                break;
+            }
+
+            Decimal distributed = 0;
+            for (String cat : usableCats) {
+                Decimal free = freeCapacityByCat.get(cat);
+                if (free <= 0) continue;
+                Decimal share = overflowHours * (free / totalFree);
+                Decimal add = share <= free ? share : free;
+                allocatedByCat.put(cat, allocatedByCat.get(cat) + add);
+                freeCapacityByCat.put(cat, free - add);
+                distributed += add;
+            }
+
+            if (distributed <= 0) {
+                break;
+            }
+            overflowHours -= distributed;
+            passes++;
+        }
+
+        // Convert final category assignments into per-day hours, clamped by max/day and rounded down.
+        for (String cat : usableCats) {
+            Integer uDays = usableDaysMap.get(cat);
+            Decimal assigned = allocatedByCat.get(cat);
+            Decimal hpd = (uDays != null && uDays > 0) ? (assigned / uDays).setScale(2, System.RoundingMode.DOWN) : 0;
+            if (hpd > MAX_HOURS_PER_DAY) hpd = MAX_HOURS_PER_DAY;
+            if (hpd < 0) hpd = 0;
+            hoursPerDayMap.put(cat, hpd);
         }
 
         Decimal cat1HoursPerDay = hoursPerDayMap.get('cat1');
@@ -223,6 +277,7 @@ public with sharing class ScheduleHoursDistributor {
             System.debug('CAT3: start=' + cat3ActualStart + ', end=' + cat3ActualEnd + ', usableDays=' + cat3UsableDays + ', pct=' + cat3Pct + ', hoursPerDay=' + cat3HoursPerDay);
             System.debug('POST: start=' + postActualStart + ', end=' + postActualEnd + ', usableDays=' + postUsableDays + ', pct=' + postPct + ', hoursPerDay=' + postHoursPerDay);
             System.debug('allSplits (holidays+onsiteGap): ' + allSplits);
+            System.debug('allocatedByCat=' + allocatedByCat + ', freeCapacityByCat=' + freeCapacityByCat + ', unscheduledHours=' + overflowHours);
         }
 
         if (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd) {
@@ -236,46 +291,6 @@ public with sharing class ScheduleHoursDistributor {
         }
         if (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd) {
             ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postHoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
-        }
-
-        Decimal totalAssigned = 0;
-        for (pse__Schedule_Exception__c exc : allExceptions) {
-            Date s = exc.pse__Date__c;
-            Date e = exc.pse__End_Date__c == null ? s : exc.pse__End_Date__c;
-            for (Date d = s; d <= e; d = d.addDays(1)) {
-                Integer dow = d.toStartOfWeek().daysBetween(d) + 1;
-                if (dow == 1) totalAssigned += (exc.pse__Monday_Hours__c == null ? 0 : exc.pse__Monday_Hours__c);
-                if (dow == 2) totalAssigned += (exc.pse__Tuesday_Hours__c == null ? 0 : exc.pse__Tuesday_Hours__c);
-                if (dow == 3) totalAssigned += (exc.pse__Wednesday_Hours__c == null ? 0 : exc.pse__Wednesday_Hours__c);
-                if (dow == 4) totalAssigned += (exc.pse__Thursday_Hours__c == null ? 0 : exc.pse__Thursday_Hours__c);
-                if (dow == 5) totalAssigned += (exc.pse__Friday_Hours__c == null ? 0 : exc.pse__Friday_Hours__c);
-                if (dow == 6) totalAssigned += (exc.pse__Saturday_Hours__c == null ? 0 : exc.pse__Saturday_Hours__c);
-                if (dow == 7) totalAssigned += (exc.pse__Sunday_Hours__c == null ? 0 : exc.pse__Sunday_Hours__c);
-            }
-        }
-
-        Decimal hoursDiff = input.numberOfHours - totalAssigned;
-        Decimal adj = hoursDiff.setScale(2, System.RoundingMode.HALF_UP);
-        if (adj != 0) {
-            pse__Schedule_Exception__c target = null;
-            if (usableCats != null && usableCats.size() > 0) {
-                String lastUsableCat = usableCats[usableCats.size()-1];
-                List<pse__Schedule_Exception__c> lastCatList = catExceptions.get(lastUsableCat);
-                if (lastCatList != null && lastCatList.size() > 0) target = lastCatList[lastCatList.size()-1];
-            }
-            if (target == null && allExceptions.size() > 0) target = allExceptions[allExceptions.size()-1];
-
-            if (target != null) {
-                Date endDate = target.pse__End_Date__c == null ? target.pse__Date__c : target.pse__End_Date__c;
-                Integer dow = endDate.toStartOfWeek().daysBetween(endDate) + 1;
-                if (dow == 1) target.pse__Monday_Hours__c = (target.pse__Monday_Hours__c == null ? 0 : target.pse__Monday_Hours__c) + adj;
-                if (dow == 2) target.pse__Tuesday_Hours__c = (target.pse__Tuesday_Hours__c == null ? 0 : target.pse__Tuesday_Hours__c) + adj;
-                if (dow == 3) target.pse__Wednesday_Hours__c = (target.pse__Wednesday_Hours__c == null ? 0 : target.pse__Wednesday_Hours__c) + adj;
-                if (dow == 4) target.pse__Thursday_Hours__c = (target.pse__Thursday_Hours__c == null ? 0 : target.pse__Thursday_Hours__c) + adj;
-                if (dow == 5) target.pse__Friday_Hours__c = (target.pse__Friday_Hours__c == null ? 0 : target.pse__Friday_Hours__c) + adj;
-                if (dow == 6) target.pse__Saturday_Hours__c = (target.pse__Saturday_Hours__c == null ? 0 : target.pse__Saturday_Hours__c) + adj;
-                if (dow == 7) target.pse__Sunday_Hours__c = (target.pse__Sunday_Hours__c == null ? 0 : target.pse__Sunday_Hours__c) + adj;
-            }
         }
 
         return new ScheduleExceptionOutputWrapper(allExceptions, null);
