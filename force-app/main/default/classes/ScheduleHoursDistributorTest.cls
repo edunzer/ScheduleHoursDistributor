@@ -327,8 +327,9 @@ public class ScheduleHoursDistributorTest {
             }
         }
 
-        // Allow small rounding differences
-        System.assertEquals(input.numberOfHours.setScale(2), totalHours.setScale(2), 'Total distributed hours should equal requested hours');
+        // With capacity-aware allocation and rounding down, scheduled can be <= requested.
+        System.assert(totalHours.setScale(2) <= input.numberOfHours.setScale(2), 'Scheduled hours should not exceed requested hours');
+        System.assert(totalHours > 0, 'Should still schedule hours when usable days exist');
     }
 
     @isTest
@@ -381,7 +382,8 @@ public class ScheduleHoursDistributorTest {
             }
         }
 
-        System.assertEquals(input.numberOfHours.setScale(2), totalHours.setScale(2), 'Total distributed hours should still equal requested hours even with holidays');
+        System.assert(totalHours.setScale(2) <= input.numberOfHours.setScale(2), 'Scheduled hours should not exceed requested hours even with holidays');
+        System.assert(totalHours > 0, 'Should still schedule hours when usable days exist');
     }
 
     @isTest
@@ -719,5 +721,58 @@ public class ScheduleHoursDistributorTest {
         System.assertEquals(null, results[1].errorMessage, 'Second input should have no error');
         System.assert(results[0].scheduleExceptions.size() >= 0);
         System.assert(results[1].scheduleExceptions.size() >= 0);
+    }
+
+    @isTest
+    static void testCapacityCapAndOverflowDropped_NoError() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 1, 6);  // Monday
+        input.endDate = Date.newInstance(2025, 1, 10);   // Friday
+        input.numberOfHours = 300;                        // Intentionally above 5-day capacity at 24/day
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 1;
+        input.cat2Weeks = 0;
+        input.cat3Weeks = 0;
+        input.postWeeks = 0;
+        input.cat1Percentage = 100;
+        input.cat2Percentage = 0;
+        input.cat3Percentage = 0;
+        input.postPercentage = 0;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result =
+            ScheduleHoursDistributor.generateCategoryScheduleExceptions(
+                new List<ScheduleHoursDistributor.ScheduleInput>{ input }
+            );
+
+        System.assertEquals(1, result.size(), 'Should return one wrapper');
+        System.assertEquals(null, result[0].errorMessage, 'Overflow should not produce an error');
+        System.assert(result[0].scheduleExceptions.size() > 0, 'Should still create schedule exceptions');
+
+        Decimal totalHours = 0;
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            Date s = exc.pse__Date__c;
+            Date e = exc.pse__End_Date__c == null ? s : exc.pse__End_Date__c;
+            for (Date d = s; d <= e; d = d.addDays(1)) {
+                Integer dow = d.toStartOfWeek().daysBetween(d) + 1;
+                Decimal dayHours = 0;
+                if (dow == 1) dayHours = (exc.pse__Monday_Hours__c == null ? 0 : exc.pse__Monday_Hours__c);
+                if (dow == 2) dayHours = (exc.pse__Tuesday_Hours__c == null ? 0 : exc.pse__Tuesday_Hours__c);
+                if (dow == 3) dayHours = (exc.pse__Wednesday_Hours__c == null ? 0 : exc.pse__Wednesday_Hours__c);
+                if (dow == 4) dayHours = (exc.pse__Thursday_Hours__c == null ? 0 : exc.pse__Thursday_Hours__c);
+                if (dow == 5) dayHours = (exc.pse__Friday_Hours__c == null ? 0 : exc.pse__Friday_Hours__c);
+                if (dow == 6) dayHours = (exc.pse__Saturday_Hours__c == null ? 0 : exc.pse__Saturday_Hours__c);
+                if (dow == 7) dayHours = (exc.pse__Sunday_Hours__c == null ? 0 : exc.pse__Sunday_Hours__c);
+
+                System.assert(dayHours <= 24, 'No scheduled day should exceed 24 hours');
+                totalHours += dayHours;
+            }
+        }
+
+        System.assert(totalHours <= 120, 'Five-day range should cap total at 120 hours');
+        System.assert(totalHours < input.numberOfHours, 'Unschedulable overflow should be dropped');
     }
 }
