@@ -52,16 +52,19 @@ The overall goal is to replace manual schedule exception entry with consistent, 
    - Usable days are counted per category using `numberOfWorkDays`.
    - Workday patterns are: `1 = Mon`, `5 = Mon–Fri`, `6 = Mon–Sat`, `7 = Mon–Sun`.
    - Holidays and onsite gap days are excluded.
-   - Daily hours are calculated based on category percentage and usable days.
+   - Daily hours are calculated using a capacity-aware allocation model.
+   - A hard cap of `24` hours/day is enforced.
+   - Overflow is redistributed across categories with remaining capacity (up to 4 passes).
 
 8. **Schedule Exception Creation**
    - Category ranges are split at holidays and onsite gap dates.
    - Each uninterrupted segment becomes its own `pse__Schedule_Exception__c` record.
    - All generated exceptions are returned to Flow.
 
-9. **Hour Adjustment (Rounding Correction)**
-   - After all exceptions are created, the total assigned hours are summed.
-   - Any rounding discrepancy between the requested total and the assigned total is applied as an adjustment to the last generated exception, ensuring the total always matches exactly.
+9. **Remainder Handling**
+   - If requested hours exceed total schedulable capacity, the method does **not** throw an error.
+   - The method schedules as many hours as possible and leaves the remainder unscheduled.
+   - This allows planned hours and scheduled hours to differ when users over-assign hours.
 
 ---
 
@@ -135,8 +138,12 @@ The method returns one wrapper per input containing:
 - Usable-day counting uses the same `numberOfWorkDays` pattern as hour assignment
 - Holidays and onsite gap days are **always excluded**
 - Category percentages are **normalized** so valid categories total **100%**
-- Daily hours are calculated using usable workdays only
-- A **rounding correction** is applied to the last generated exception to ensure the total assigned hours exactly match `numberOfHours`
+- Capacity is calculated per category as `usableDays × 24`
+- Initial assignment is percentage-based, then capped by category capacity
+- Overflow is rolled into other categories with available capacity
+- Redistribution is limited to a maximum of **4 passes**
+- Per-day assigned hours are capped at **24**
+- If capacity is exhausted, remaining requested hours are intentionally left unscheduled (no error)
 
 ---
 
@@ -206,8 +213,8 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testExistingMultiDayExceptionExcludesHolidayDates` | No generated exception overlaps a multi-day holiday range |
 | `testOnsiteGapWeekIsSevenDaysZeroHours` | Onsite gap week is exactly 7 days with all-zero hours |
 | `testPercentSumLessAndGreaterThan100` | Percentages summing to < 100 or > 100 are normalized correctly |
-| `testMathWithoutExistingExceptions_TotalHoursMatch` | Total distributed hours exactly match requested hours |
-| `testMathWithExistingHolidayExcludesDate_TotalHoursMatch` | Holiday dates are excluded and total hours still match |
+| `testMathWithoutExistingExceptions_TotalHoursMatch` | Scheduled hours do not exceed requested hours |
+| `testMathWithExistingHolidayExcludesDate_TotalHoursMatch` | Holiday dates are excluded and scheduled hours do not exceed requested hours |
 | `testExtractHolidayDates_NullAndRanges` | `extractHolidayDates` handles null entries, single-day, and multi-day exceptions |
 | `testAddSplitExceptions_SplittingBehavior` | `addSplitExceptions` correctly splits segments at split dates |
 | `testCountUsableWorkdays_VariousRanges` | `countUsableWorkdays` counts correctly for 3-day, 6-day, and 7-day schedules, including exclusions |
@@ -216,4 +223,5 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testGenerateScheduleExceptions_MixedValidAndInvalidInputs` | Batch processing of valid + invalid input returns one success and one error |
 | `testOnsiteGapClampedToInputDateRange` | Onsite gap exception and all generated exceptions remain within input start/end boundaries |
 | `testGenerateScheduleExceptions_TwoValidInputs_NoErrors` | Two valid inputs both return wrappers with no errors |
+| `testCapacityCapAndOverflowDropped_NoError` | Per-day hours are capped at 24, overflow beyond capacity is dropped, and no error is returned |
 
