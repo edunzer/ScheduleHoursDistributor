@@ -230,6 +230,7 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testPercentSumLessAndGreaterThan100` | Percentages summing to < 100 or > 100 are normalized correctly |
 | `testMathWithoutExistingExceptions_TotalHoursMatch` | Scheduled hours do not exceed requested hours |
 | `testMathWithExistingHolidayExcludesDate_TotalHoursMatch` | Holiday dates are excluded and scheduled hours do not exceed requested hours |
+| `testPerCategoryHoursMatchConfiguredPercentages` | Hours allocated to each category exactly match the configured percentages — cat1 receives 60% and cat2 receives 40% of total hours, verified per-category not just as an aggregate total |
 | `testExtractHolidayDates_NullAndRanges` | `extractHolidayDates` handles null entries, single-day, and multi-day exceptions |
 | `testAddSplitExceptions_SplittingBehavior` | `addSplitExceptions` correctly splits segments at split dates; asserts exact segment count and precise start/end boundaries for every produced segment |
 | `testCountUsableWorkdays_VariousRanges` | `countUsableWorkdays` counts correctly for 3-day, 6-day, and 7-day schedules, including exclusions |
