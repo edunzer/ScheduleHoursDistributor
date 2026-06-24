@@ -701,6 +701,57 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testPostWeeksConstrainsPostDateRange() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 1, 1);
+        input.endDate = Date.newInstance(2025, 4, 30);
+        input.numberOfHours = 120;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 4;
+        input.cat2Weeks = 3;
+        input.cat3Weeks = 2;
+        input.postWeeks = 2; // Post should be exactly 14 days from the day after onsite gap week.
+        input.cat1Percentage = 25;
+        input.cat2Percentage = 25;
+        input.cat3Percentage = 25;
+        input.postPercentage = 25;
+        input.onsiteStartDate = Date.newInstance(2025, 2, 3); // Monday
+        input.onsiteEndDate = Date.newInstance(2025, 2, 10);
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result =
+            ScheduleHoursDistributor.generateCategoryScheduleExceptions(
+                new List<ScheduleHoursDistributor.ScheduleInput>{ input }
+            );
+
+        System.assertEquals(1, result.size(), 'Should return one result');
+        System.assertEquals(null, result[0].errorMessage, 'Should not return an error');
+
+        Date expectedPostStart = Date.newInstance(2025, 2, 10);
+        Date expectedPostEnd = Date.newInstance(2025, 2, 23);
+
+        Boolean foundPostRange = false;
+        Boolean foundAfterPostEnd = false;
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            Date s = exc.pse__Date__c;
+            Date e = (exc.pse__End_Date__c == null) ? s : exc.pse__End_Date__c;
+
+            if (s <= expectedPostStart && e >= expectedPostEnd) {
+                foundPostRange = true;
+            }
+            if (s > expectedPostEnd || e > expectedPostEnd) {
+                foundAfterPostEnd = true;
+            }
+        }
+
+        System.assertEquals(true, foundPostRange, 'Post exception range should include 2025-02-10 through 2025-02-23');
+        System.assertEquals(false, foundAfterPostEnd, 'No generated exception should extend beyond postWeeks-limited post end');
+    }
+
+    @isTest
     static void testGenerateScheduleExceptions_TwoValidInputs_NoErrors() {
         // Use the two schedules from test setup
         List<pse__Schedule__c> schedules = [SELECT Id, pse__Start_Date__c, pse__End_Date__c, pse__Scheduled_Hours__c FROM pse__Schedule__c ORDER BY Id LIMIT 2];
