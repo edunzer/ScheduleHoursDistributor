@@ -31,12 +31,17 @@ public with sharing class ScheduleHoursDistributor {
         if (input.endDate == null) return createErrorWrapper('Error: End Date cannot be null.');
         if (input.startDate > input.endDate) return createErrorWrapper('Error: Start Date must be on or before End Date.');
         if (input.numberOfHours == null) return createErrorWrapper('Error: Number of Hours cannot be null.');
+        if (input.numberOfHours <= 0) return createErrorWrapper('Error: Number of Hours must be greater than zero.');
         if (input.numberOfWorkDays == null) return createErrorWrapper('Error: Number of Work Days cannot be null.');
         Integer boundedWorkDays = boundWorkDays(input.numberOfWorkDays);
         if (input.cat1Weeks == null || input.cat2Weeks == null || input.cat3Weeks == null || input.postWeeks == null)
             return createErrorWrapper('Error: Week values cannot be null.');
+        if (input.cat1Weeks < 0 || input.cat2Weeks < 0 || input.cat3Weeks < 0 || input.postWeeks < 0)
+            return createErrorWrapper('Error: Week values cannot be negative.');
         if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null)
             return createErrorWrapper('Error: Percentage values cannot be null.');
+        if (input.cat1Percentage < 0 || input.cat2Percentage < 0 || input.cat3Percentage < 0 || input.postPercentage < 0)
+            return createErrorWrapper('Error: Percentage values cannot be negative.');
         if ((input.onsiteStartDate != null && input.onsiteEndDate == null) || (input.onsiteStartDate == null && input.onsiteEndDate != null))
             return createErrorWrapper('Error: Both Onsite Start Date and Onsite End Date must be provided.');
         if (input.onsiteStartDate != null && input.onsiteEndDate != null && input.onsiteStartDate > input.onsiteEndDate)

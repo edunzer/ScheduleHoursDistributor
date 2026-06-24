@@ -23,6 +23,9 @@ The overall goal is to replace manual schedule exception entry with consistent, 
 
 2. **Input Validation**
    - Validates required fields such as schedule dates, total hours, workdays, category weeks, and percentages.
+   - `numberOfHours` must be greater than zero — a zero or negative value returns an explicit validation error.
+   - All week values (`cat1Weeks`, `cat2Weeks`, `cat3Weeks`, `postWeeks`) must be zero or positive — negative values return an explicit validation error.
+   - All percentage values (`cat1Percentage`, `cat2Percentage`, `cat3Percentage`, `postPercentage`) must be zero or positive — negative values return an explicit validation error.
    - `numberOfWorkDays` is bounded to the supported range `1..7` before allocation and exception-field population.
    - Ensures onsite dates (if provided) are valid and complete.
 
@@ -217,6 +220,9 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testGenerateScheduleExceptionsWithNullScheduleId` | Null `scheduleId` returns a specific validation error |
 | `testStartDateAfterEndDateValidation` | `startDate > endDate` returns validation error |
 | `testOnsiteStartAfterEndDateValidation` | `onsiteStartDate > onsiteEndDate` returns validation error |
+| `testNegativeNumberOfHours_ReturnsError` | `numberOfHours <= 0` returns an explicit validation error instead of silently under-allocating |
+| `testNegativeCatWeeks_ReturnsError` | Negative week values return an explicit validation error |
+| `testNegativePercentages_ReturnsError` | Negative percentage values return an explicit validation error |
 | `testExistingMultiDayExceptionExcludesHolidayDates` | No generated exception overlaps a multi-day holiday range |
 | `testOnsiteGapWeekIsSevenDaysZeroHours` | Onsite gap week is exactly 7 days with all-zero hours |
 | `testGetNormalizedDayOfWeek_MondayIsOne` | Runtime normalization always maps Monday to 1 and Sunday to 7 |
