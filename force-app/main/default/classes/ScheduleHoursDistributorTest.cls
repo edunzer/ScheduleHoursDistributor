@@ -319,23 +319,27 @@ public class ScheduleHoursDistributorTest {
         System.assertEquals(1, result.size());
         System.assertEquals(null, result[0].errorMessage);
 
-        Boolean foundWeekGap = false;
+        // The Monday of the week containing onsiteStartDate (2025-03-05 Wed) must be 2025-03-03.
+        // Directly assert the gap exception exists at that exact Monday with correct span and zero hours.
+        Date expectedGapStart = Date.newInstance(2025, 3, 3);
+        Date expectedGapEnd   = Date.newInstance(2025, 3, 9);
+        pse__Schedule_Exception__c gapExc = null;
         for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
-            if (exc.pse__End_Date__c != null) {
-                Integer len = exc.pse__Date__c.daysBetween(exc.pse__End_Date__c) + 1;
-                if (len == 7) {
-                    // All per-day hours should be zero for the onsite gap week
-                    Boolean allZero = (exc.pse__Monday_Hours__c == 0 && exc.pse__Tuesday_Hours__c == 0 && exc.pse__Wednesday_Hours__c == 0 && exc.pse__Thursday_Hours__c == 0 && exc.pse__Friday_Hours__c == 0 && exc.pse__Saturday_Hours__c == 0 && exc.pse__Sunday_Hours__c == 0);
-                    if (allZero) {
-                        System.assertEquals(Date.newInstance(2025, 3, 3), exc.pse__Date__c, 'Onsite gap week should start on Monday of onsite start week');
-                        System.assertEquals(Date.newInstance(2025, 3, 9), exc.pse__End_Date__c, 'Onsite gap week should end on Sunday of onsite start week');
-                        foundWeekGap = true;
-                        break;
-                    }
-                }
+            if (exc.pse__Date__c == expectedGapStart) {
+                gapExc = exc;
+                break;
             }
         }
-        System.assertEquals(true, foundWeekGap, 'Should find a 7-day onsite gap exception with zero hours');
+        System.assertNotEquals(null, gapExc, 'Onsite gap exception must start on the Monday of the onsite start week (2025-03-03)');
+        System.assertEquals(expectedGapEnd, gapExc.pse__End_Date__c, 'Onsite gap exception must end on Sunday of the onsite start week (2025-03-09)');
+        System.assertEquals(7, gapExc.pse__Date__c.daysBetween(gapExc.pse__End_Date__c) + 1, 'Onsite gap exception must span exactly 7 days');
+        System.assertEquals(0, gapExc.pse__Monday_Hours__c,    'Onsite gap Monday hours must be zero');
+        System.assertEquals(0, gapExc.pse__Tuesday_Hours__c,   'Onsite gap Tuesday hours must be zero');
+        System.assertEquals(0, gapExc.pse__Wednesday_Hours__c, 'Onsite gap Wednesday hours must be zero');
+        System.assertEquals(0, gapExc.pse__Thursday_Hours__c,  'Onsite gap Thursday hours must be zero');
+        System.assertEquals(0, gapExc.pse__Friday_Hours__c,    'Onsite gap Friday hours must be zero');
+        System.assertEquals(0, gapExc.pse__Saturday_Hours__c,  'Onsite gap Saturday hours must be zero');
+        System.assertEquals(0, gapExc.pse__Sunday_Hours__c,    'Onsite gap Sunday hours must be zero');
     }
 
     @isTest
@@ -504,8 +508,9 @@ public class ScheduleHoursDistributorTest {
         List<pse__Schedule_Exception__c> allEx = new List<pse__Schedule_Exception__c>();
         List<pse__Schedule_Exception__c> cat = new List<pse__Schedule_Exception__c>();
         ScheduleHoursDistributor.addSplitExceptions(segStart, segEnd, 8, 5, schedule.Id, segStart, segEnd, splits, allEx, cat);
-        System.assert(cat.size() > 0, 'Should create a segment after the initial split day');
+        System.assertEquals(1, cat.size(), 'Should create exactly one segment after the initial split day');
         System.assertEquals(Date.newInstance(2025,1,7), cat[0].pse__Date__c, 'First segment should start at 2025-01-07');
+        System.assertEquals(Date.newInstance(2025,1,10), cat[0].pse__End_Date__c, 'First segment should end at 2025-01-10');
 
         // 2) all days are splits -> no exceptions created
         splits = new Set<Date>();
@@ -521,10 +526,13 @@ public class ScheduleHoursDistributorTest {
         allEx.clear(); cat.clear();
         ScheduleHoursDistributor.addSplitExceptions(segStart, segEnd, 8, 5, schedule.Id, segStart, segEnd, splits, allEx, cat);
         System.assertEquals(3, cat.size(), 'Should produce three split segments for two split days');
-        // verify boundaries roughly
-        System.assertEquals(Date.newInstance(2025,1,6), cat[0].pse__Date__c);
-        System.assertEquals(Date.newInstance(2025,1,9), cat[0].pse__End_Date__c);
-        System.assertEquals(Date.newInstance(2025,1,11), cat[1].pse__Date__c);
+        // verify all segment boundaries exactly
+        System.assertEquals(Date.newInstance(2025,1,6),  cat[0].pse__Date__c,    'Segment 1 should start at 2025-01-06');
+        System.assertEquals(Date.newInstance(2025,1,9),  cat[0].pse__End_Date__c,'Segment 1 should end at 2025-01-09');
+        System.assertEquals(Date.newInstance(2025,1,11), cat[1].pse__Date__c,    'Segment 2 should start at 2025-01-11');
+        System.assertEquals(Date.newInstance(2025,1,14), cat[1].pse__End_Date__c,'Segment 2 should end at 2025-01-14');
+        System.assertEquals(Date.newInstance(2025,1,16), cat[2].pse__Date__c,    'Segment 3 should start at 2025-01-16');
+        System.assertEquals(Date.newInstance(2025,1,20), cat[2].pse__End_Date__c,'Segment 3 should end at 2025-01-20');
     }
 
     @isTest
@@ -808,22 +816,21 @@ public class ScheduleHoursDistributorTest {
         Date expectedPostStart = Date.newInstance(2025, 2, 10);
         Date expectedPostEnd = Date.newInstance(2025, 2, 23);
 
-        Boolean foundPostRange = false;
+        Boolean foundPostStart = false;
+        Boolean foundPostEnd   = false;
         Boolean foundAfterPostEnd = false;
         for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
             Date s = exc.pse__Date__c;
             Date e = (exc.pse__End_Date__c == null) ? s : exc.pse__End_Date__c;
 
-            if (s <= expectedPostStart && e >= expectedPostEnd) {
-                foundPostRange = true;
-            }
-            if (s > expectedPostEnd || e > expectedPostEnd) {
-                foundAfterPostEnd = true;
-            }
+            if (s == expectedPostStart) foundPostStart = true;
+            if (e == expectedPostEnd)   foundPostEnd   = true;
+            if (s > expectedPostEnd || e > expectedPostEnd) foundAfterPostEnd = true;
         }
 
-        System.assertEquals(true, foundPostRange, 'Post exception range should include 2025-02-10 through 2025-02-23');
-        System.assertEquals(false, foundAfterPostEnd, 'No generated exception should extend beyond postWeeks-limited post end');
+        System.assertEquals(true,  foundPostStart,    'Post category must start exactly on 2025-02-10 (day after onsite gap week ends)');
+        System.assertEquals(true,  foundPostEnd,      'Post category must end exactly on 2025-02-23 (postWeeks × 7 days = 14 days from post start)');
+        System.assertEquals(false, foundAfterPostEnd, 'No generated exception should extend beyond the postWeeks-derived end date');
     }
 
     @isTest
