@@ -224,20 +224,21 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testNegativeCatWeeks_ReturnsError` | Negative week values return an explicit validation error |
 | `testNegativePercentages_ReturnsError` | Negative percentage values return an explicit validation error |
 | `testExistingMultiDayExceptionExcludesHolidayDates` | No generated exception overlaps a multi-day holiday range |
-| `testOnsiteGapWeekIsSevenDaysZeroHours` | Onsite gap week is exactly 7 days with all-zero hours |
+| `testOnsiteGapWeekIsSevenDaysZeroHours` | Onsite gap exception is found by its exact computed Monday start date; asserts it is exactly 7 days spanning Monday–Sunday with all per-day hours zero |
 | `testGetNormalizedDayOfWeek_MondayIsOne` | Runtime normalization always maps Monday to 1 and Sunday to 7 |
 | `testNumberOfWorkDaysOutOfRange_IsConsistentEverywhere` | Out-of-range `numberOfWorkDays` values are bounded consistently for usable-day counting and exception day-field population |
 | `testPercentSumLessAndGreaterThan100` | Percentages summing to < 100 or > 100 are normalized correctly |
 | `testMathWithoutExistingExceptions_TotalHoursMatch` | Scheduled hours do not exceed requested hours |
 | `testMathWithExistingHolidayExcludesDate_TotalHoursMatch` | Holiday dates are excluded and scheduled hours do not exceed requested hours |
+| `testPerCategoryHoursMatchConfiguredPercentages` | Hours allocated to each category exactly match the configured percentages — cat1 receives 60% and cat2 receives 40% of total hours, verified per-category not just as an aggregate total |
 | `testExtractHolidayDates_NullAndRanges` | `extractHolidayDates` handles null entries, single-day, and multi-day exceptions |
-| `testAddSplitExceptions_SplittingBehavior` | `addSplitExceptions` correctly splits segments at split dates |
+| `testAddSplitExceptions_SplittingBehavior` | `addSplitExceptions` correctly splits segments at split dates; asserts exact segment count and precise start/end boundaries for every produced segment |
 | `testCountUsableWorkdays_VariousRanges` | `countUsableWorkdays` counts correctly for 3-day, 6-day, and 7-day schedules, including exclusions |
 | `testAllCategoriesInvalid_NoCrash` | Zero-week categories produce no exceptions without throwing an error |
 | `testGenerateScheduleExceptions_MultipleValidInputs` | Batch processing of two valid inputs returns two wrappers |
 | `testGenerateScheduleExceptions_MixedValidAndInvalidInputs` | Batch processing of valid + invalid input returns one success and one error |
 | `testOnsiteGapClampedToInputDateRange` | Onsite gap exception and all generated exceptions remain within input start/end boundaries |
-| `testPostWeeksConstrainsPostDateRange` | Post range is limited by `postWeeks` and does not extend to schedule end unless capped behavior requires it |
+| `testPostWeeksConstrainsPostDateRange` | Post category starts exactly on the day after the onsite gap week ends and ends exactly on the `postWeeks × 7` derived date; no exception extends beyond that date |
 | `testGenerateScheduleExceptions_TwoValidInputs_NoErrors` | Two valid inputs both return wrappers with no errors |
 | `testCapacityCapAndOverflowDropped_NoError` | Per-day hours are capped at 24, overflow beyond capacity is dropped, and no error is returned |
 
