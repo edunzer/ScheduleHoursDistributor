@@ -155,9 +155,6 @@ public with sharing class ScheduleHoursDistributor {
 
         List<pse__Schedule_Exception__c> allExceptions = new List<pse__Schedule_Exception__c>();
 
-        Set<Date> excludeDates = new Set<Date>();
-        excludeDates.addAll(holidayDates);
-
         if (onsiteNeeded && onsiteGapWeekStart != null && onsiteGapWeekEnd != null) {
             Date onsiteSegmentStart = (onsiteGapWeekStart < input.startDate) ? input.startDate : onsiteGapWeekStart;
             Date onsiteSegmentEnd = (onsiteGapWeekEnd > input.endDate) ? input.endDate : onsiteGapWeekEnd;
@@ -340,16 +337,6 @@ public with sharing class ScheduleHoursDistributor {
             pse__Saturday_Hours__c = (boundedWorkDays >= 6) ? hoursPerDay : 0,
             pse__Sunday_Hours__c = (boundedWorkDays >= 7) ? hoursPerDay : 0
         );
-    }
-
-    // Helper: Returns a wrapper with an error message
-    private static List<ScheduleExceptionOutputWrapper> returnErrorWrapper(String errorMessage) {
-        return new List<ScheduleExceptionOutputWrapper>{
-            new ScheduleExceptionOutputWrapper(
-                new List<pse__Schedule_Exception__c>(),
-                errorMessage
-            )
-        };
     }
 
     // Helper: Adds split exceptions for a category, splitting at every holiday and onsite gap day
