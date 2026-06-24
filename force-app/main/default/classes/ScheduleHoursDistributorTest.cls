@@ -174,6 +174,81 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testNegativeNumberOfHours_ReturnsError() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 1, 1);
+        input.endDate = Date.newInstance(2025, 7, 1);
+        input.numberOfHours = -100;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 1;
+        input.cat2Weeks = 1;
+        input.cat3Weeks = 1;
+        input.postWeeks = 1;
+        input.cat1Percentage = 25;
+        input.cat2Percentage = 25;
+        input.cat3Percentage = 25;
+        input.postPercentage = 25;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(1, result.size());
+        System.assertNotEquals(null, result[0].errorMessage, 'An error message should be present for negative numberOfHours');
+        System.assertEquals('Error: Number of Hours must be greater than zero.', result[0].errorMessage);
+    }
+
+    @isTest
+    static void testNegativeCatWeeks_ReturnsError() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 1, 1);
+        input.endDate = Date.newInstance(2025, 7, 1);
+        input.numberOfHours = 100;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = -2;
+        input.cat2Weeks = 1;
+        input.cat3Weeks = 1;
+        input.postWeeks = 1;
+        input.cat1Percentage = 25;
+        input.cat2Percentage = 25;
+        input.cat3Percentage = 25;
+        input.postPercentage = 25;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(1, result.size());
+        System.assertNotEquals(null, result[0].errorMessage, 'An error message should be present for negative week values');
+        System.assertEquals('Error: Week values cannot be negative.', result[0].errorMessage);
+    }
+
+    @isTest
+    static void testNegativePercentages_ReturnsError() {
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 1, 1);
+        input.endDate = Date.newInstance(2025, 7, 1);
+        input.numberOfHours = 100;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 1;
+        input.cat2Weeks = 1;
+        input.cat3Weeks = 1;
+        input.postWeeks = 1;
+        input.cat1Percentage = -10;
+        input.cat2Percentage = 25;
+        input.cat3Percentage = 25;
+        input.postPercentage = 25;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = ScheduleHoursDistributor.generateCategoryScheduleExceptions(new List<ScheduleHoursDistributor.ScheduleInput>{input});
+        System.assertEquals(1, result.size());
+        System.assertNotEquals(null, result[0].errorMessage, 'An error message should be present for negative percentages');
+        System.assertEquals('Error: Percentage values cannot be negative.', result[0].errorMessage);
+    }
+
+    @isTest
     static void testExistingMultiDayExceptionExcludesHolidayDates() {
         // Use the multi-day holiday inserted in @testSetup
         pse__Schedule_Exception__c holiday = [
