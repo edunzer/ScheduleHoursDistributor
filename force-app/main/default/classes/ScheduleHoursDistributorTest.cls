@@ -839,4 +839,26 @@ public class ScheduleHoursDistributorTest {
         System.assert(totalHours <= 120, 'Five-day range should cap total at 120 hours');
         System.assert(totalHours < input.numberOfHours, 'Unschedulable overflow should be dropped');
     }
+
+    @isTest
+    static void testNumberOfWorkDaysOutOfRange_IsConsistentEverywhere() {
+        Date weekStart = Date.newInstance(2025, 1, 6); // Monday
+        Date weekEnd = Date.newInstance(2025, 1, 12);  // Sunday
+
+        // Low out-of-range value should clamp to 1 (Monday only).
+        Integer usableLow = ScheduleHoursDistributor.countUsableWorkdays(weekStart, weekEnd, new Set<Date>(), 0);
+        System.assertEquals(1, usableLow, 'numberOfWorkDays=0 should clamp to 1 usable day');
+        pse__Schedule_Exception__c excLow = ScheduleHoursDistributor.createScheduleException(null, weekStart, weekEnd, 0, 8);
+        System.assertEquals(8, excLow.pse__Monday_Hours__c, 'Clamped low value should populate Monday hours');
+        System.assertEquals(0, excLow.pse__Tuesday_Hours__c, 'Clamped low value should not populate Tuesday hours');
+        System.assertEquals(0, excLow.pse__Sunday_Hours__c, 'Clamped low value should not populate Sunday hours');
+
+        // High out-of-range value should clamp to 7 (all days).
+        Integer usableHigh = ScheduleHoursDistributor.countUsableWorkdays(weekStart, weekEnd, new Set<Date>(), 9);
+        System.assertEquals(7, usableHigh, 'numberOfWorkDays=9 should clamp to 7 usable days');
+        pse__Schedule_Exception__c excHigh = ScheduleHoursDistributor.createScheduleException(null, weekStart, weekEnd, 9, 8);
+        System.assertEquals(8, excHigh.pse__Monday_Hours__c, 'Clamped high value should populate Monday hours');
+        System.assertEquals(8, excHigh.pse__Tuesday_Hours__c, 'Clamped high value should populate Tuesday hours');
+        System.assertEquals(8, excHigh.pse__Sunday_Hours__c, 'Clamped high value should populate Sunday hours');
+    }
 }

@@ -23,6 +23,7 @@ The overall goal is to replace manual schedule exception entry with consistent, 
 
 2. **Input Validation**
    - Validates required fields such as schedule dates, total hours, workdays, category weeks, and percentages.
+   - `numberOfWorkDays` is bounded to the supported range `1..7` before allocation and exception-field population.
    - Ensures onsite dates (if provided) are valid and complete.
 
 3. **Holiday Processing**
@@ -89,7 +90,7 @@ The `ScheduleInput` class provides all parameters required for processing.
 - `startDate`
 - `endDate`
 - `numberOfHours`
-- `numberOfWorkDays` — number of working days per week (e.g., `5` for Mon–Fri, `7` for all days)
+- `numberOfWorkDays` — number of working days per week. Values are bounded to `1..7` (e.g., `5` for Mon–Fri, `7` for all days).
 
 ### Category Configuration
 - `cat1Weeks`, `cat2Weeks`, `cat3Weeks`, `postWeeks`
@@ -138,6 +139,7 @@ The method returns one wrapper per input containing:
 
 - Hours are assigned to the first `numberOfWorkDays` days of each week (for example: `5 = Mon–Fri`, `7 = Mon–Sun`)
 - Usable-day counting uses the same `numberOfWorkDays` pattern as hour assignment
+- Out-of-range `numberOfWorkDays` inputs are consistently bounded to `1..7` across both day counting and schedule-exception day fields
 - Holidays and onsite gap days are **always excluded**
 - Category percentages are **normalized** so valid categories total **100%**
 - Capacity is calculated per category as `usableDays × 24`
@@ -173,7 +175,7 @@ The following helper methods are `public` and can be called directly in unit tes
 Extracts all individual dates covered by a list of schedule exceptions (used to identify holiday dates). Handles single-day and multi-day exceptions, as well as `null` entries in the list.
 
 ### `createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay)`
-Creates and returns a single `pse__Schedule_Exception__c` record with per-day hours populated based on the `workDays` count (1 = Mon only, 5 = Mon–Fri, 7 = all days).
+Creates and returns a single `pse__Schedule_Exception__c` record with per-day hours populated based on the `workDays` count. `workDays` is bounded to `1..7` (1 = Mon only, 5 = Mon–Fri, 7 = all days).
 
 ### `addSplitExceptions(Date segStart, Date segEnd, Decimal hoursPerDay, Integer workDays, Id scheduleId, Date inputStart, Date inputEnd, Set<Date> allSplits, List<pse__Schedule_Exception__c> allExceptions, List<pse__Schedule_Exception__c> catList)`
 Iterates a date range and splits it into contiguous segments at every holiday and onsite gap date. Each uninterrupted segment is created as a separate `pse__Schedule_Exception__c` record added to both `allExceptions` and `catList`.
@@ -218,6 +220,7 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testExistingMultiDayExceptionExcludesHolidayDates` | No generated exception overlaps a multi-day holiday range |
 | `testOnsiteGapWeekIsSevenDaysZeroHours` | Onsite gap week is exactly 7 days with all-zero hours |
 | `testGetNormalizedDayOfWeek_MondayIsOne` | Runtime normalization always maps Monday to 1 and Sunday to 7 |
+| `testNumberOfWorkDaysOutOfRange_IsConsistentEverywhere` | Out-of-range `numberOfWorkDays` values are bounded consistently for usable-day counting and exception day-field population |
 | `testPercentSumLessAndGreaterThan100` | Percentages summing to < 100 or > 100 are normalized correctly |
 | `testMathWithoutExistingExceptions_TotalHoursMatch` | Scheduled hours do not exceed requested hours |
 | `testMathWithExistingHolidayExcludesDate_TotalHoursMatch` | Holiday dates are excluded and scheduled hours do not exceed requested hours |

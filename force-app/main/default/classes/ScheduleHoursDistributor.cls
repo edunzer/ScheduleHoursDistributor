@@ -32,6 +32,7 @@ public with sharing class ScheduleHoursDistributor {
         if (input.startDate > input.endDate) return createErrorWrapper('Error: Start Date must be on or before End Date.');
         if (input.numberOfHours == null) return createErrorWrapper('Error: Number of Hours cannot be null.');
         if (input.numberOfWorkDays == null) return createErrorWrapper('Error: Number of Work Days cannot be null.');
+        Integer boundedWorkDays = boundWorkDays(input.numberOfWorkDays);
         if (input.cat1Weeks == null || input.cat2Weeks == null || input.cat3Weeks == null || input.postWeeks == null)
             return createErrorWrapper('Error: Week values cannot be null.');
         if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null)
@@ -162,7 +163,7 @@ public with sharing class ScheduleHoursDistributor {
             Date onsiteSegmentEnd = (onsiteGapWeekEnd > input.endDate) ? input.endDate : onsiteGapWeekEnd;
             if (onsiteSegmentStart <= onsiteSegmentEnd) {
                 addSplitExceptions(
-                    onsiteSegmentStart, onsiteSegmentEnd, 0, input.numberOfWorkDays, input.scheduleId,
+                    onsiteSegmentStart, onsiteSegmentEnd, 0, boundedWorkDays, input.scheduleId,
                     input.startDate, input.endDate, holidayDates, allExceptions, new List<pse__Schedule_Exception__c>()
                 );
             }
@@ -180,13 +181,13 @@ public with sharing class ScheduleHoursDistributor {
         };
 
         Integer cat1UsableDays = (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd)
-            ? countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits, input.numberOfWorkDays) : 0;
+            ? countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits, boundedWorkDays) : 0;
         Integer cat2UsableDays = (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd)
-            ? countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits, input.numberOfWorkDays) : 0;
+            ? countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits, boundedWorkDays) : 0;
         Integer cat3UsableDays = (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd)
-            ? countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits, input.numberOfWorkDays) : 0;
+            ? countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits, boundedWorkDays) : 0;
         Integer postUsableDays = (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd)
-            ? countUsableWorkdays(postActualStart, postActualEnd, allSplits, input.numberOfWorkDays) : 0;
+            ? countUsableWorkdays(postActualStart, postActualEnd, allSplits, boundedWorkDays) : 0;
 
         Map<String, Decimal> hoursPerDayMap = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
         List<String> usableCats = new List<String>();
@@ -288,16 +289,16 @@ public with sharing class ScheduleHoursDistributor {
         }
 
         if (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd) {
-            ScheduleHoursDistributor.addSplitExceptions(cat1ActualStart, cat1ActualEnd, cat1HoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
+            ScheduleHoursDistributor.addSplitExceptions(cat1ActualStart, cat1ActualEnd, cat1HoursPerDay, boundedWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
         }
         if (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd) {
-            ScheduleHoursDistributor.addSplitExceptions(cat2ActualStart, cat2ActualEnd, cat2HoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat2'));
+            ScheduleHoursDistributor.addSplitExceptions(cat2ActualStart, cat2ActualEnd, cat2HoursPerDay, boundedWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat2'));
         }
         if (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd) {
-            ScheduleHoursDistributor.addSplitExceptions(cat3ActualStart, cat3ActualEnd, cat3HoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat3'));
+            ScheduleHoursDistributor.addSplitExceptions(cat3ActualStart, cat3ActualEnd, cat3HoursPerDay, boundedWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat3'));
         }
         if (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd) {
-            ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postHoursPerDay, input.numberOfWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
+            ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postHoursPerDay, boundedWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
         }
 
         return new ScheduleExceptionOutputWrapper(allExceptions, null);
@@ -326,17 +327,18 @@ public with sharing class ScheduleHoursDistributor {
 
     // Helper: Creates and returns a single schedule exception record
     public static pse__Schedule_Exception__c createScheduleException(Id scheduleId, Date startDate, Date endDate, Integer workDays, Decimal hoursPerDay) {
+        Integer boundedWorkDays = boundWorkDays(workDays);
         return new pse__Schedule_Exception__c(
             pse__Schedule__c = scheduleId,
             pse__Date__c = startDate,
             pse__End_Date__c = endDate,
-            pse__Monday_Hours__c = (workDays >= 1) ? hoursPerDay : 0,
-            pse__Tuesday_Hours__c = (workDays >= 2) ? hoursPerDay : 0,
-            pse__Wednesday_Hours__c = (workDays >= 3) ? hoursPerDay : 0,
-            pse__Thursday_Hours__c = (workDays >= 4) ? hoursPerDay : 0,
-            pse__Friday_Hours__c = (workDays >= 5) ? hoursPerDay : 0,
-            pse__Saturday_Hours__c = (workDays >= 6) ? hoursPerDay : 0,
-            pse__Sunday_Hours__c = (workDays >= 7) ? hoursPerDay : 0
+            pse__Monday_Hours__c = (boundedWorkDays >= 1) ? hoursPerDay : 0,
+            pse__Tuesday_Hours__c = (boundedWorkDays >= 2) ? hoursPerDay : 0,
+            pse__Wednesday_Hours__c = (boundedWorkDays >= 3) ? hoursPerDay : 0,
+            pse__Thursday_Hours__c = (boundedWorkDays >= 4) ? hoursPerDay : 0,
+            pse__Friday_Hours__c = (boundedWorkDays >= 5) ? hoursPerDay : 0,
+            pse__Saturday_Hours__c = (boundedWorkDays >= 6) ? hoursPerDay : 0,
+            pse__Sunday_Hours__c = (boundedWorkDays >= 7) ? hoursPerDay : 0
         );
     }
 
@@ -373,9 +375,7 @@ public with sharing class ScheduleHoursDistributor {
     // Helper: Counts usable workdays between two dates, excluding holidays and onsite gap days.
     // Workday pattern follows numberOfWorkDays: 1=Mon only ... 5=Mon-Fri, 6=Mon-Sat, 7=Mon-Sun.
     public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates, Integer numberOfWorkDays) {
-        Integer boundedWorkDays = numberOfWorkDays == null ? 5 : numberOfWorkDays;
-        if (boundedWorkDays < 1) boundedWorkDays = 1;
-        if (boundedWorkDays > 7) boundedWorkDays = 7;
+        Integer boundedWorkDays = boundWorkDays(numberOfWorkDays);
 
         Integer count = 0;
         for (Date d = start; d <= endDate; d = d.addDays(1)) {
@@ -415,11 +415,17 @@ public with sharing class ScheduleHoursDistributor {
 
     // Helper: Returns true if date is one of the configured workdays for the week.
     public static Boolean isScheduledWorkday(Date d, Integer numberOfWorkDays) {
+        Integer boundedWorkDays = boundWorkDays(numberOfWorkDays);
+        Integer dow = getNormalizedDayOfWeek(d); // 1=Monday, 7=Sunday
+        return dow >= 1 && dow <= boundedWorkDays;
+    }
+
+    // Helper: Clamps workdays to supported range [1..7], defaulting to 5 when null.
+    private static Integer boundWorkDays(Integer numberOfWorkDays) {
         Integer boundedWorkDays = numberOfWorkDays == null ? 5 : numberOfWorkDays;
         if (boundedWorkDays < 1) boundedWorkDays = 1;
         if (boundedWorkDays > 7) boundedWorkDays = 7;
-        Integer dow = getNormalizedDayOfWeek(d); // 1=Monday, 7=Sunday
-        return dow >= 1 && dow <= boundedWorkDays;
+        return boundedWorkDays;
     }
 
     // Helper: Returns true if the date is a weekday (Mon-Fri)
