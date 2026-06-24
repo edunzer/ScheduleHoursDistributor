@@ -479,6 +479,62 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testPerCategoryHoursMatchConfiguredPercentages() {
+        // Verifies that the hours allocated to each category match the configured percentages,
+        pse__Schedule__c schedule = [SELECT Id FROM pse__Schedule__c WHERE pse__Start_Date__c = :Date.newInstance(2025,1,1) LIMIT 1];
+
+        ScheduleHoursDistributor.ScheduleInput input = new ScheduleHoursDistributor.ScheduleInput();
+        input.scheduleId = schedule.Id;
+        input.startDate = Date.newInstance(2025, 1, 6);   // Monday
+        input.endDate   = Date.newInstance(2025, 3, 7);   // Friday
+        input.numberOfHours    = 100;
+        input.numberOfWorkDays = 5;
+        input.cat1Weeks = 4; input.cat2Weeks = 4; input.cat3Weeks = 0; input.postWeeks = 0;
+        input.cat1Percentage = 60; input.cat2Percentage = 40; input.cat3Percentage = 0; input.postPercentage = 0;
+        input.existingExceptions = new List<pse__Schedule_Exception__c>();
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result =
+            ScheduleHoursDistributor.generateCategoryScheduleExceptions(
+                new List<ScheduleHoursDistributor.ScheduleInput>{ input }
+            );
+
+        System.assertEquals(1, result.size());
+        System.assertEquals(null, result[0].errorMessage, 'Should not return an error');
+
+        // Known category date boundaries derived from class logic (4 weeks × 7 = 28 days each,
+        // working backward from endDate with cat3 invalid at 0 weeks):
+        Date cat1RangeStart = Date.newInstance(2025, 1, 11);
+        Date cat1RangeEnd   = Date.newInstance(2025, 2, 7);
+        Date cat2RangeStart = Date.newInstance(2025, 2, 8);
+        Date cat2RangeEnd   = Date.newInstance(2025, 3, 7);
+
+        Decimal cat1Hours = 0;
+        Decimal cat2Hours = 0;
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            Date s = exc.pse__Date__c;
+            Date e = exc.pse__End_Date__c == null ? s : exc.pse__End_Date__c;
+            for (Date d = s; d <= e; d = d.addDays(1)) {
+                Integer dow = ScheduleHoursDistributor.getNormalizedDayOfWeek(d);
+                Decimal hrs = 0;
+                if (dow == 1) hrs = exc.pse__Monday_Hours__c    == null ? 0 : exc.pse__Monday_Hours__c;
+                if (dow == 2) hrs = exc.pse__Tuesday_Hours__c   == null ? 0 : exc.pse__Tuesday_Hours__c;
+                if (dow == 3) hrs = exc.pse__Wednesday_Hours__c == null ? 0 : exc.pse__Wednesday_Hours__c;
+                if (dow == 4) hrs = exc.pse__Thursday_Hours__c  == null ? 0 : exc.pse__Thursday_Hours__c;
+                if (dow == 5) hrs = exc.pse__Friday_Hours__c    == null ? 0 : exc.pse__Friday_Hours__c;
+                if (dow == 6) hrs = exc.pse__Saturday_Hours__c  == null ? 0 : exc.pse__Saturday_Hours__c;
+                if (dow == 7) hrs = exc.pse__Sunday_Hours__c    == null ? 0 : exc.pse__Sunday_Hours__c;
+                if (d >= cat1RangeStart && d <= cat1RangeEnd) cat1Hours += hrs;
+                if (d >= cat2RangeStart && d <= cat2RangeEnd) cat2Hours += hrs;
+            }
+        }
+
+        // 60% of 100 = 60 hrs; 40% of 100 = 40 hrs.
+        // Per-day: 60/20 = 3.00, 40/20 = 2.00 — both divide evenly so no rounding error.
+        System.assertEquals(60, cat1Hours, 'Cat1 should receive exactly 60 hours (60% of 100)');
+        System.assertEquals(40, cat2Hours, 'Cat2 should receive exactly 40 hours (40% of 100)');
+    }
+
+    @isTest
     static void testExtractHolidayDates_NullAndRanges() {
         // Single-day, multi-day and null entry
         List<pse__Schedule_Exception__c> listWithNull = new List<pse__Schedule_Exception__c>();
