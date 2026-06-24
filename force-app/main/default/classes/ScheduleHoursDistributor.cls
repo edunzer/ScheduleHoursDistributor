@@ -81,10 +81,15 @@ public with sharing class ScheduleHoursDistributor {
         Date postStart = null;
         Date postEnd = null;
         if (postValid) {
-            postEnd = input.endDate;
             postStart = onsiteGapWeekEnd != null ? onsiteGapWeekEnd.addDays(1) : input.endDate.addDays(1);
-            if (postStart > postEnd) {
+            if (postDays <= 0) {
                 postValid = false;
+            } else {
+                Date requestedPostEnd = postStart.addDays(postDays - 1);
+                postEnd = (requestedPostEnd < input.endDate) ? requestedPostEnd : input.endDate;
+                if (postStart > postEnd) {
+                    postValid = false;
+                }
             }
         }
 
@@ -100,7 +105,7 @@ public with sharing class ScheduleHoursDistributor {
         cat1Valid = (cat1End >= input.startDate && cat1Start <= input.endDate);
         cat2Valid = (cat2End >= input.startDate && cat2Start <= input.endDate);
         cat3Valid = (cat3End >= input.startDate && cat3Start <= input.endDate);
-        postValid = (postEnd >= input.startDate && postStart <= input.endDate && postValid);
+        postValid = (postValid && postStart != null && postEnd != null && postEnd >= input.startDate && postStart <= input.endDate);
 
         Date cat1ActualStart = cat1Valid ? (cat1Start > input.startDate ? cat1Start : input.startDate) : null;
         Date cat1ActualEnd = cat1Valid ? (cat1End < input.endDate ? cat1End : input.endDate) : null;

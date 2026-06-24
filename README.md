@@ -32,6 +32,7 @@ The overall goal is to replace manual schedule exception entry with consistent, 
 4. **Onsite Logic (Optional)**
    - If an onsite period is detected (< 30 days and within the schedule range):
    - A Monday–Sunday onsite gap week is calculated.
+   - Weekday normalization is runtime-context aware so Monday is always treated as day 1 regardless of locale ordering.
    - The generated onsite gap exception is clamped to the input schedule range.
      - The gap week receives a zero-hour schedule exception.
      - All category allocations exclude the onsite gap.
@@ -40,6 +41,7 @@ The overall goal is to replace manual schedule exception entry with consistent, 
 5. **Category Range Calculation**
    - Category durations are converted from weeks to days (`weeks × 7`, decimals truncated).
    - Categories are calculated backward from the schedule end date.
+   - The Post category is constrained by `postWeeks` (`postWeeks × 7` days) and capped to the schedule end date.
    - Each category is trimmed to the overall schedule window.
    - Categories that do not overlap the schedule are ignored.
 
@@ -159,7 +161,7 @@ Onsite is considered valid only if:
 - The generated onsite gap exception is **clamped to the input schedule window** (`startDate` to `endDate`)
 - The gap week generates a **zero-hour schedule exception**
 - All category allocations **exclude onsite gap days**
-- The **Post** category begins **after the onsite gap week ends**
+- The **Post** category begins **after the onsite gap week ends** and lasts up to `postWeeks × 7` days, capped by `endDate`
 
 ---
 
@@ -188,6 +190,9 @@ Returns `true` when a date falls within the configured weekly work pattern (`1 =
 ### `isWeekday(Date d)`
 Returns `true` if the given date falls on Monday through Friday.
 
+### `getNormalizedDayOfWeek(Date d)`
+Returns a normalized weekday index where **Monday = 1** and **Sunday = 7**. The method adapts to runtime locale/context ordering so downstream scheduling logic remains stable.
+
 ---
 
 ## Testing
@@ -212,6 +217,7 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testOnsiteStartAfterEndDateValidation` | `onsiteStartDate > onsiteEndDate` returns validation error |
 | `testExistingMultiDayExceptionExcludesHolidayDates` | No generated exception overlaps a multi-day holiday range |
 | `testOnsiteGapWeekIsSevenDaysZeroHours` | Onsite gap week is exactly 7 days with all-zero hours |
+| `testGetNormalizedDayOfWeek_MondayIsOne` | Runtime normalization always maps Monday to 1 and Sunday to 7 |
 | `testPercentSumLessAndGreaterThan100` | Percentages summing to < 100 or > 100 are normalized correctly |
 | `testMathWithoutExistingExceptions_TotalHoursMatch` | Scheduled hours do not exceed requested hours |
 | `testMathWithExistingHolidayExcludesDate_TotalHoursMatch` | Holiday dates are excluded and scheduled hours do not exceed requested hours |
@@ -222,6 +228,7 @@ The test class `ScheduleHoursDistributorTest` provides comprehensive coverage fo
 | `testGenerateScheduleExceptions_MultipleValidInputs` | Batch processing of two valid inputs returns two wrappers |
 | `testGenerateScheduleExceptions_MixedValidAndInvalidInputs` | Batch processing of valid + invalid input returns one success and one error |
 | `testOnsiteGapClampedToInputDateRange` | Onsite gap exception and all generated exceptions remain within input start/end boundaries |
+| `testPostWeeksConstrainsPostDateRange` | Post range is limited by `postWeeks` and does not extend to schedule end unless capped behavior requires it |
 | `testGenerateScheduleExceptions_TwoValidInputs_NoErrors` | Two valid inputs both return wrappers with no errors |
 | `testCapacityCapAndOverflowDropped_NoError` | Per-day hours are capped at 24, overflow beyond capacity is dropped, and no error is returned |
 
