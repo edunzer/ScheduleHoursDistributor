@@ -59,6 +59,7 @@ The overall goal is to replace manual schedule exception entry with consistent, 
    - Workday patterns are: `1 = Mon`, `5 = Mon–Fri`, `6 = Mon–Sat`, `7 = Mon–Sun`.
    - Holidays and onsite gap days are excluded.
    - Daily hours are calculated using a capacity-aware allocation model.
+   - Totals are exact to the cent: category allocations are converted to whole cents (largest-remainder method), and within a category the first few usable days carry one extra cent (`0.01h`) where needed, so the generated hours add up exactly to the requested hours (or to capacity when over-assigned).
    - A hard cap of `24` hours/day is enforced.
    - Overflow is redistributed across categories with remaining capacity (up to 4 passes).
 
@@ -150,6 +151,7 @@ The method returns one wrapper per input containing:
 - Overflow is rolled into other categories with available capacity
 - Redistribution is limited to a maximum of **4 passes**
 - Per-day assigned hours are capped at **24**
+- Hours are kept at 2 decimals with **no loss to rounding**: when a category's hours don't divide evenly by its usable days, its first usable days get `+0.01h` (e.g. 50h over 3 days → 16.67, 16.67, 16.66). That can add one extra exception record per category.
 - If capacity is exhausted, remaining requested hours are intentionally left unscheduled (no error)
 
 ---
@@ -251,5 +253,8 @@ Private helpers keep tests short and locale-independent: `buildInput`, `setWeeks
 | `testOnsiteGapClampedToInputDateRange` | Onsite gap exception and all generated exceptions remain within input start/end boundaries |
 | `testPostWeeksConstrainsPostDateRange` | Post category starts exactly on the day after the onsite gap week ends and ends exactly on the `postWeeks × 7` derived date; no exception extends beyond that date |
 | `testGenerateScheduleExceptions_TwoValidInputs_NoErrors` | Two valid inputs both return non-empty results with no errors, all within their input ranges |
+| `testHoursPreservedWhenNotEvenlyDivisible` | 50h over 3 days → 16.67 / 16.67 / 16.66 in two exception records; total exactly 50 |
+| `testExtraCentSkipsHolidays` | Extra cents land on the first *usable* days, skipping a holiday |
+| `testCategoryTotalsExactWithRepeatingShares` | 1 : 2 shares of 100h give exactly 33.33h / 66.67h, total 100.00 |
 | `testCapacityCapAndOverflowDropped_NoError` | Per-day hours are capped at 24, the range is filled to exactly its capacity (120h), overflow is dropped, and no error is returned |
 

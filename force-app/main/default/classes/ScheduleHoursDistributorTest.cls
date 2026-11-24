@@ -527,6 +527,60 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testHoursPreservedWhenNotEvenlyDivisible() {
+        // 50h over 3 usable days (Mon 01-06 .. Wed 01-08) = 16.666.. per day = 5000 cents / 3 = 1666 r 2.
+        // Expect 16.67 on the first two days and 16.66 on the third: exactly 50.00 in total.
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 8), 50);
+        setWeeks(input, 1, 0, 0, 0);
+        setPercentages(input, 100, 0, 0, 0);
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
+        System.assertEquals(null, result[0].errorMessage);
+        System.assertEquals(50, sumScheduledHours(result[0].scheduleExceptions), 'Scheduled total must equal requested hours exactly');
+        System.assertEquals(2, result[0].scheduleExceptions.size(), 'Range should be split after the last day carrying an extra cent');
+        pse__Schedule_Exception__c first = result[0].scheduleExceptions[0];
+        pse__Schedule_Exception__c second = result[0].scheduleExceptions[1];
+        System.assertEquals(Date.newInstance(2025, 1, 6), first.pse__Date__c);
+        System.assertEquals(Date.newInstance(2025, 1, 7), first.pse__End_Date__c);
+        System.assertEquals(16.67, first.pse__Monday_Hours__c, 'First two usable days carry the extra cent');
+        System.assertEquals(Date.newInstance(2025, 1, 8), second.pse__Date__c);
+        System.assertEquals(Date.newInstance(2025, 1, 8), second.pse__End_Date__c);
+        System.assertEquals(16.66, second.pse__Wednesday_Hours__c, 'Remaining day gets the base amount');
+    }
+
+    @isTest
+    static void testExtraCentSkipsHolidays() {
+        // Range Mon 01-06 .. Thu 01-09 with a holiday on Monday: usable days are Tue, Wed, Thu.
+        // 50h = 5000 cents / 3 = 1666 r 2: the extra cents must land on the first two *usable* days (Tue, Wed), not the holiday.
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 9), 50);
+        setWeeks(input, 1, 0, 0, 0);
+        setPercentages(input, 100, 0, 0, 0);
+        input.existingExceptions = new List<pse__Schedule_Exception__c>{ zeroHourException(null, Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 6)) };
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
+        System.assertEquals(null, result[0].errorMessage);
+        System.assertEquals(50, sumScheduledHours(result[0].scheduleExceptions), 'Scheduled total must equal requested hours exactly');
+        System.assertEquals(33.34, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 1, 7), Date.newInstance(2025, 1, 8)), 'Tue and Wed carry the extra cent (16.67 each)');
+        System.assertEquals(16.66, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 1, 9), Date.newInstance(2025, 1, 9)), 'Thu gets the base amount');
+        System.assertEquals(0, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 6)), 'Holiday gets nothing');
+    }
+
+    @isTest
+    static void testCategoryTotalsExactWithRepeatingShares() {
+        // Percentages 1 : 2 -> shares 1/3 and 2/3 of 100h = 33.333.. / 66.666..
+        // Largest-remainder gives the spare cent to Cat2: Cat1 = 33.33, Cat2 = 66.67, total = 100.00.
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);
+        setWeeks(input, 4, 4, 0, 0);
+        setPercentages(input, 1, 2, 0, 0);
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
+        System.assertEquals(null, result[0].errorMessage);
+        System.assertEquals(33.33, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 1, 11), Date.newInstance(2025, 2, 7)), 'Cat1 total');
+        System.assertEquals(66.67, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 2, 8), Date.newInstance(2025, 3, 7)), 'Cat2 total');
+        System.assertEquals(100, sumScheduledHours(result[0].scheduleExceptions), 'Grand total must equal requested hours exactly');
+    }
+
+    @isTest
     static void testCapacityCapAndOverflowDropped_NoError() {
         // 300h requested over 5 weekdays; capacity is 5 × 24 = 120h
         ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 10), 300);
