@@ -68,7 +68,11 @@ The overall goal is to replace manual schedule exception entry with consistent, 
    - Each uninterrupted segment becomes its own `pse__Schedule_Exception__c` record.
    - All generated exceptions are returned to Flow.
 
-9. **Remainder Handling**
+9. **Uncovered Days**
+   - Days in `startDate..endDate` that fall outside every category, the onsite gap week and the existing exceptions (for example before Cat1, or after Post ends) get **zero-hour** exceptions, split at holidays.
+   - Every day in the schedule is therefore covered by exactly one generated or existing exception, so the schedule's base weekly hours never add to the requested total.
+
+10. **Remainder Handling**
    - If requested hours exceed total schedulable capacity, the method does **not** throw an error.
    - The method schedules as many hours as possible and leaves the remainder unscheduled.
    - This allows planned hours and scheduled hours to differ when users over-assign hours.
@@ -247,14 +251,16 @@ Private helpers keep tests short and locale-independent: `buildInput`, `setWeeks
 | `testExtractHolidayDates_NullAndRanges` | `extractHolidayDates` handles null entries, single-day, and multi-day exceptions |
 | `testAddSplitExceptions_SplittingBehavior` | `addSplitExceptions` correctly splits segments at split dates; asserts exact segment count and precise start/end boundaries for every produced segment |
 | `testCountUsableWorkdays_VariousRanges` | `countUsableWorkdays` counts correctly for 3-day, 6-day, and 7-day schedules, including exclusions |
-| `testAllCategoriesInvalid_NoCrash` | Zero-week categories produce no exceptions without throwing an error |
+| `testAllCategoriesInvalid_NoCrash` | Zero-week categories produce no category exceptions and no error; the whole range becomes one zero-hour fill exception |
 | `testGenerateScheduleExceptions_MultipleValidInputs` | Batch processing of two valid inputs returns two wrappers, each containing only exceptions for its own schedule |
 | `testGenerateScheduleExceptions_MixedValidAndInvalidInputs` | Batch processing of valid + invalid input returns one success and one error |
 | `testOnsiteGapClampedToInputDateRange` | Onsite gap exception and all generated exceptions remain within input start/end boundaries |
-| `testPostWeeksConstrainsPostDateRange` | Post category starts exactly on the day after the onsite gap week ends and ends exactly on the `postWeeks × 7` derived date; no exception extends beyond that date |
+| `testPostWeeksConstrainsPostDateRange` | Post category starts exactly on the day after the onsite gap week ends and ends exactly on the `postWeeks × 7` derived date; no exception straddles that date; days after Post are zero-filled and all 120h land in the categories |
 | `testGenerateScheduleExceptions_TwoValidInputs_NoErrors` | Two valid inputs both return non-empty results with no errors, all within their input ranges |
 | `testHoursPreservedWhenNotEvenlyDivisible` | 50h over 3 days → 16.67 / 16.67 / 16.66 in two exception records; total exactly 50 |
 | `testExtraCentSkipsHolidays` | Extra cents land on the first *usable* days, skipping a holiday |
 | `testCategoryTotalsExactWithRepeatingShares` | 1 : 2 shares of 100h give exactly 33.33h / 66.67h, total 100.00 |
+| `testUncoveredDaysBeforeCat1AreZeroFilled` | Days before Cat1 get a zero-hour fill exception; every day is covered exactly once and the total stays exact |
+| `testEveryDayCoveredOnceWithOnsiteAndHolidays` | With onsite gap, Post and holidays, every non-holiday day is covered exactly once and the total equals the requested 200h |
 | `testCapacityCapAndOverflowDropped_NoError` | Per-day hours are capped at 24, the range is filled to exactly its capacity (120h), overflow is dropped, and no error is returned |
 
