@@ -125,6 +125,17 @@ The method returns one wrapper per input containing:
   A descriptive message populated when validation or execution fails.  
   If successful, this value is `null`.
 
+- `scheduledHours` / `unscheduledHours`  
+  Hours placed on the generated exceptions, and requested hours that could not be placed (no usable days, or every usable day already at 24h). They always add up to `numberOfHours`.
+
+- Per category (`cat1`, `cat2`, `cat3`, `post`):
+  - `{cat}Start` / `{cat}End`: the category's range clipped to the schedule, or `null` when it has no range (for example 0 weeks).
+  - `{cat}UsableDays`: scheduled workdays in the range, excluding holidays and the onsite gap week.
+  - `{cat}Hours`: total hours allocated to the category.
+  - `{cat}HoursPerDay`: base hours per usable day. The first few usable days may carry 0.01h more so that `{cat}Hours` is exact.
+
+All totals and category fields are `null` when `errorMessage` is set.
+
 ---
 
 ## Category Behavior
@@ -261,6 +272,9 @@ Private helpers keep tests short and locale-independent: `buildInput`, `setWeeks
 | `testExtraCentSkipsHolidays` | Extra cents land on the first *usable* days, skipping a holiday |
 | `testCategoryTotalsExactWithRepeatingShares` | 1 : 2 shares of 100h give exactly 33.33h / 66.67h, total 100.00 |
 | `testUncoveredDaysBeforeCat1AreZeroFilled` | Days before Cat1 get a zero-hour fill exception; every day is covered exactly once and the total stays exact |
+| `testOutputReportsCategoryMetadataAndTotals` | Output reports each category's clipped range, usable days, hours and base hours per day, plus scheduled/unscheduled totals that match the generated exceptions |
+| `testOutputReportsUnscheduledHoursWhenCapped` | When the 24h/day cap is hit, the dropped hours are reported in `unscheduledHours` (300h requested → 120 scheduled, 180 unscheduled) |
+| `testOutputMetadataIsNullOnError` | On a validation error, totals and category fields stay `null` |
 | `testEveryDayCoveredOnceWithOnsiteAndHolidays` | With onsite gap, Post and holidays, every non-holiday day is covered exactly once and the total equals the requested 200h |
 | `testCapacityCapAndOverflowDropped_NoError` | Per-day hours are capped at 24, the range is filled to exactly its capacity (120h), overflow is dropped, and no error is returned |
 
