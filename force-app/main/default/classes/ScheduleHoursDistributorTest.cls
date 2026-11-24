@@ -581,6 +581,22 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testPreviousRunOutputPassedBackBlocksEveryDay() {
+        // Documented re-run contract: every existing exception blocks its dates, including non-zero-hour ones
+        // from an earlier run. Passing a previous run's output back in therefore leaves nothing to schedule.
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 10), 50);
+        setWeeks(input, 1, 0, 0, 0);
+        setPercentages(input, 100, 0, 0, 0);
+        List<pse__Schedule_Exception__c> firstRun = run(input)[0].scheduleExceptions;
+        System.assertEquals(50, sumScheduledHours(firstRun), 'First run schedules the requested hours');
+
+        input.existingExceptions = firstRun;
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> rerun = run(input);
+        System.assertEquals(null, rerun[0].errorMessage, 'Re-run does not error');
+        System.assertEquals(0, rerun[0].scheduleExceptions.size(), 'Every day is blocked by the previous output, so nothing is generated');
+    }
+
+    @isTest
     static void testCategoryTotalsExactWithRepeatingShares() {
         // Percentages 1 : 2 -> shares 1/3 and 2/3 of 100h = 33.333.. / 66.666..
         // Largest-remainder gives the spare cent to Cat2: Cat1 = 33.33, Cat2 = 66.67, total = 100.00.
