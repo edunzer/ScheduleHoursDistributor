@@ -69,11 +69,21 @@ public with sharing class ScheduleHoursDistributor {
             allExceptions.addAll(buildSplitExceptions(gapSegStart, gapSegEnd, 0, workDays, input.scheduleId, input.startDate, input.endDate, holidayDates));
         }
         for (CategoryPlan plan : plans) {
-            if (plan.hasRange()) {
-                allExceptions.addAll(
-                    buildSplitExceptions(plan.actualStart, plan.actualEnd, plan.hoursPerDay, workDays, input.scheduleId, input.startDate, input.endDate, allSplits)
-                );
+            if (!plan.hasRange()) {
+                continue;
             }
+            Date rangeStart = plan.actualStart;
+            if (plan.extraCentDays > 0) {
+                // The first extraCentDays usable days carry one extra cent so the category total is exact.
+                Date lastExtraDay = nthUsableDay(plan.actualStart, plan.actualEnd, allSplits, workDays, plan.extraCentDays);
+                allExceptions.addAll(
+                    buildSplitExceptions(rangeStart, lastExtraDay, plan.hoursPerDay + 0.01, workDays, input.scheduleId, input.startDate, input.endDate, allSplits)
+                );
+                rangeStart = lastExtraDay.addDays(1);
+            }
+            allExceptions.addAll(
+                buildSplitExceptions(rangeStart, plan.actualEnd, plan.hoursPerDay, workDays, input.scheduleId, input.startDate, input.endDate, allSplits)
+            );
         }
 
         if (DEBUG) {
@@ -235,15 +245,59 @@ public with sharing class ScheduleHoursDistributor {
             passes++;
         }
 
-        // Convert allocations into per-day hours, rounded down and clamped to [0, MAX_HOURS_PER_DAY].
+        // Convert to whole cents so the 2-decimal per-day hours add up exactly to the scheduled total.
+        Decimal scheduledHours = 0;
         for (CategoryPlan plan : usablePlans) {
-            Decimal hpd = (plan.allocatedHours / plan.usableDays).setScale(2, System.RoundingMode.DOWN);
-            if (hpd > MAX_HOURS_PER_DAY) hpd = MAX_HOURS_PER_DAY;
-            if (hpd < 0) hpd = 0;
-            plan.hoursPerDay = hpd;
+            scheduledHours += plan.allocatedHours;
+        }
+        Long remainingCents = (scheduledHours * 100).round(System.RoundingMode.HALF_UP);
+        for (CategoryPlan plan : usablePlans) {
+            plan.allocatedCents = (plan.allocatedHours * 100).round(System.RoundingMode.DOWN);
+            remainingCents -= plan.allocatedCents;
+        }
+        // Largest-remainder method: leftover cents go to the categories whose truncated fraction was largest.
+        while (remainingCents > 0) {
+            CategoryPlan best = null;
+            Decimal bestFraction = null;
+            for (CategoryPlan plan : usablePlans) {
+                Decimal fraction = plan.allocatedHours * 100 - plan.allocatedCents;
+                if (plan.allocatedCents < plan.capacity * 100 && (bestFraction == null || fraction > bestFraction)) {
+                    best = plan;
+                    bestFraction = fraction;
+                }
+            }
+            if (best == null) {
+                break;
+            }
+            best.allocatedCents = best.allocatedCents + 1;
+            remainingCents--;
         }
 
-        return overflowHours;
+        // Within a category, every usable day gets baseCents and the first extraCentDays usable days get one cent more.
+        Decimal totalScheduled = 0;
+        for (CategoryPlan plan : usablePlans) {
+            Long baseCents = plan.allocatedCents / plan.usableDays;
+            plan.extraCentDays = (plan.allocatedCents - baseCents * plan.usableDays).intValue();
+            plan.hoursPerDay = Decimal.valueOf(baseCents).divide(100, 2);
+            plan.allocatedHours = Decimal.valueOf(plan.allocatedCents).divide(100, 2);
+            totalScheduled += plan.allocatedHours;
+        }
+
+        return numberOfHours - totalScheduled;
+    }
+
+    // Returns the n-th (1-based) usable day in [startDate, endDate], or endDate if there are fewer than n.
+    private static Date nthUsableDay(Date startDate, Date endDate, Set<Date> excludeDates, Integer workDays, Integer n) {
+        Integer seen = 0;
+        for (Date d = startDate; d <= endDate; d = d.addDays(1)) {
+            if (isScheduledWorkday(d, workDays) && !excludeDates.contains(d)) {
+                seen++;
+                if (seen == n) {
+                    return d;
+                }
+            }
+        }
+        return endDate;
     }
 
     // Week counts are converted to whole days (weeks x 7, decimals truncated).
@@ -402,7 +456,10 @@ public with sharing class ScheduleHoursDistributor {
         public Integer usableDays = 0;
         public Decimal capacity = 0;
         public Decimal allocatedHours = 0;
+        public Long allocatedCents = 0;
+        // Base hours per usable day; the first extraCentDays usable days get hoursPerDay + 0.01.
         public Decimal hoursPerDay = 0;
+        public Integer extraCentDays = 0;
 
         public CategoryPlan(String key, Decimal inputPct) {
             this.key = key;
