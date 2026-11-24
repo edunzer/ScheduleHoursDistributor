@@ -596,6 +596,67 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testOutputReportsCategoryMetadataAndTotals() {
+        // Same layout as testCategoryTotalsExactWithRepeatingShares: Cat1 = 2025-01-11..02-07, Cat2 = 02-08..03-07.
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);
+        setWeeks(input, 4, 4, 0, 0);
+        setPercentages(input, 1, 2, 0, 0);
+
+        ScheduleHoursDistributor.ScheduleExceptionOutputWrapper out = run(input)[0];
+        System.assertEquals(null, out.errorMessage);
+        System.assertEquals(100, out.scheduledHours, 'Scheduled hours');
+        System.assertEquals(0, out.unscheduledHours, 'Unscheduled hours');
+
+        System.assertEquals(Date.newInstance(2025, 1, 11), out.cat1Start);
+        System.assertEquals(Date.newInstance(2025, 2, 7), out.cat1End);
+        System.assertEquals(20, out.cat1UsableDays, 'Cat1 has 4 full Mon-Fri weeks');
+        System.assertEquals(33.33, out.cat1Hours);
+        System.assertEquals(1.66, out.cat1HoursPerDay, '3333 cents / 20 days = 166 r 13');
+
+        System.assertEquals(Date.newInstance(2025, 2, 8), out.cat2Start);
+        System.assertEquals(Date.newInstance(2025, 3, 7), out.cat2End);
+        System.assertEquals(20, out.cat2UsableDays);
+        System.assertEquals(66.67, out.cat2Hours);
+        System.assertEquals(3.33, out.cat2HoursPerDay, '6667 cents / 20 days = 333 r 7');
+
+        // Zero-week categories report no range and no hours.
+        System.assertEquals(null, out.cat3Start);
+        System.assertEquals(null, out.cat3End);
+        System.assertEquals(0, out.cat3UsableDays);
+        System.assertEquals(0, out.cat3Hours);
+        System.assertEquals(null, out.postStart);
+        System.assertEquals(0, out.postHours);
+
+        System.assertEquals(out.scheduledHours, sumScheduledHours(out.scheduleExceptions), 'Reported total matches the generated exceptions');
+    }
+
+    @isTest
+    static void testOutputReportsUnscheduledHoursWhenCapped() {
+        // 300h requested over 5 weekdays; capacity is 5 x 24 = 120h, so 180h cannot be placed.
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 10), 300);
+        setWeeks(input, 1, 0, 0, 0);
+        setPercentages(input, 100, 0, 0, 0);
+
+        ScheduleHoursDistributor.ScheduleExceptionOutputWrapper out = run(input)[0];
+        System.assertEquals(null, out.errorMessage);
+        System.assertEquals(120, out.scheduledHours);
+        System.assertEquals(180, out.unscheduledHours);
+        System.assertEquals(5, out.cat1UsableDays);
+        System.assertEquals(24, out.cat1HoursPerDay);
+    }
+
+    @isTest
+    static void testOutputMetadataIsNullOnError() {
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 10), -1);
+        ScheduleHoursDistributor.ScheduleExceptionOutputWrapper out = run(input)[0];
+        System.assertNotEquals(null, out.errorMessage);
+        System.assertEquals(null, out.scheduledHours);
+        System.assertEquals(null, out.unscheduledHours);
+        System.assertEquals(null, out.cat1Start);
+        System.assertEquals(null, out.cat1Hours);
+    }
+
+    @isTest
     static void testUncoveredDaysBeforeCat1AreZeroFilled() {
         // Cat1 starts 2025-01-11, so 2025-01-06 .. 2025-01-10 is outside every category
         ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);

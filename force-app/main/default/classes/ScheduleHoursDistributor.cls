@@ -103,7 +103,13 @@ public with sharing class ScheduleHoursDistributor {
             System.debug('allSplits=' + allSplits + ', unscheduledHours=' + unscheduledHours);
         }
 
-        return new ScheduleExceptionOutputWrapper(allExceptions, null);
+        ScheduleExceptionOutputWrapper output = new ScheduleExceptionOutputWrapper(allExceptions, null);
+        output.scheduledHours = input.numberOfHours - unscheduledHours;
+        output.unscheduledHours = unscheduledHours;
+        for (CategoryPlan plan : plans) {
+            output.setCategory(plan);
+        }
+        return output;
     }
 
     // Returns an error message for invalid input, or null when the input is valid.
@@ -496,7 +502,8 @@ public with sharing class ScheduleHoursDistributor {
         }
     }
 
-    // Wrapper class: Holds output schedule exceptions and calculated values
+    // Wrapper class: Holds output schedule exceptions and calculated values.
+    // The totals and category fields are null when errorMessage is set.
     public class ScheduleExceptionOutputWrapper {
         @InvocableVariable(label='Schedule Exceptions' description='List of Schedule Exception records')
         public List<pse__Schedule_Exception__c> scheduleExceptions;
@@ -504,9 +511,94 @@ public with sharing class ScheduleHoursDistributor {
         @InvocableVariable(label='Error Message' description='Error encountered during execution')
         public String errorMessage;
 
+        @InvocableVariable(label='Scheduled Hours' description='Total hours placed on the generated exceptions')
+        public Decimal scheduledHours;
+        @InvocableVariable(label='Unscheduled Hours' description='Requested hours that could not be placed (no usable days, or the 24h/day cap was reached)')
+        public Decimal unscheduledHours;
+
+        @InvocableVariable(label='Category 1 Start Date' description='First day of the Category 1 range, clipped to the schedule; null when the category has no range')
+        public Date cat1Start;
+        @InvocableVariable(label='Category 1 End Date' description='Last day of the Category 1 range, clipped to the schedule; null when the category has no range')
+        public Date cat1End;
+        @InvocableVariable(label='Category 1 Usable Days' description='Scheduled workdays in the Category 1 range, excluding holidays and the onsite gap week')
+        public Integer cat1UsableDays;
+        @InvocableVariable(label='Category 1 Hours' description='Total hours allocated to Category 1')
+        public Decimal cat1Hours;
+        @InvocableVariable(label='Category 1 Hours Per Day' description='Base hours per usable day for Category 1; the first few usable days may carry 0.01 more so the total is exact')
+        public Decimal cat1HoursPerDay;
+
+        @InvocableVariable(label='Category 2 Start Date' description='First day of the Category 2 range, clipped to the schedule; null when the category has no range')
+        public Date cat2Start;
+        @InvocableVariable(label='Category 2 End Date' description='Last day of the Category 2 range, clipped to the schedule; null when the category has no range')
+        public Date cat2End;
+        @InvocableVariable(label='Category 2 Usable Days' description='Scheduled workdays in the Category 2 range, excluding holidays and the onsite gap week')
+        public Integer cat2UsableDays;
+        @InvocableVariable(label='Category 2 Hours' description='Total hours allocated to Category 2')
+        public Decimal cat2Hours;
+        @InvocableVariable(label='Category 2 Hours Per Day' description='Base hours per usable day for Category 2; the first few usable days may carry 0.01 more so the total is exact')
+        public Decimal cat2HoursPerDay;
+
+        @InvocableVariable(label='Category 3 Start Date' description='First day of the Category 3 range, clipped to the schedule; null when the category has no range')
+        public Date cat3Start;
+        @InvocableVariable(label='Category 3 End Date' description='Last day of the Category 3 range, clipped to the schedule; null when the category has no range')
+        public Date cat3End;
+        @InvocableVariable(label='Category 3 Usable Days' description='Scheduled workdays in the Category 3 range, excluding holidays and the onsite gap week')
+        public Integer cat3UsableDays;
+        @InvocableVariable(label='Category 3 Hours' description='Total hours allocated to Category 3')
+        public Decimal cat3Hours;
+        @InvocableVariable(label='Category 3 Hours Per Day' description='Base hours per usable day for Category 3; the first few usable days may carry 0.01 more so the total is exact')
+        public Decimal cat3HoursPerDay;
+
+        @InvocableVariable(label='Post Start Date' description='First day of the Post range, clipped to the schedule; null when the category has no range')
+        public Date postStart;
+        @InvocableVariable(label='Post End Date' description='Last day of the Post range, clipped to the schedule; null when the category has no range')
+        public Date postEnd;
+        @InvocableVariable(label='Post Usable Days' description='Scheduled workdays in the Post range, excluding holidays and the onsite gap week')
+        public Integer postUsableDays;
+        @InvocableVariable(label='Post Hours' description='Total hours allocated to Post')
+        public Decimal postHours;
+        @InvocableVariable(label='Post Hours Per Day' description='Base hours per usable day for Post; the first few usable days may carry 0.01 more so the total is exact')
+        public Decimal postHoursPerDay;
+
         public ScheduleExceptionOutputWrapper(List<pse__Schedule_Exception__c> exceptions, String error) {
             this.scheduleExceptions = exceptions;
             this.errorMessage = error;
+        }
+
+        // Copies one category's computed range and allocation into its flat Flow fields.
+        private void setCategory(CategoryPlan plan) {
+            Date startDate = plan.hasRange() ? plan.actualStart : null;
+            Date endDate = plan.hasRange() ? plan.actualEnd : null;
+            switch on plan.key {
+                when 'cat1' {
+                    cat1Start = startDate;
+                    cat1End = endDate;
+                    cat1UsableDays = plan.usableDays;
+                    cat1Hours = plan.allocatedHours;
+                    cat1HoursPerDay = plan.hoursPerDay;
+                }
+                when 'cat2' {
+                    cat2Start = startDate;
+                    cat2End = endDate;
+                    cat2UsableDays = plan.usableDays;
+                    cat2Hours = plan.allocatedHours;
+                    cat2HoursPerDay = plan.hoursPerDay;
+                }
+                when 'cat3' {
+                    cat3Start = startDate;
+                    cat3End = endDate;
+                    cat3UsableDays = plan.usableDays;
+                    cat3Hours = plan.allocatedHours;
+                    cat3HoursPerDay = plan.hoursPerDay;
+                }
+                when 'post' {
+                    postStart = startDate;
+                    postEnd = endDate;
+                    postUsableDays = plan.usableDays;
+                    postHours = plan.allocatedHours;
+                    postHoursPerDay = plan.hoursPerDay;
+                }
+            }
         }
     }
 
