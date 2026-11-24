@@ -43,11 +43,10 @@ public with sharing class ScheduleHoursDistributor {
             gapEnd = gapStart.addDays(6);
         }
 
-        // 2. Category date ranges and percentages.
+        // 2. Category date ranges.
         List<CategoryPlan> plans = buildCategoryPlans(input, gapStart, gapEnd);
-        normalizePercentages(plans);
 
-        // 3. Usable days per category (holidays and onsite gap days excluded).
+        // 3. Usable days per category (holidays and onsite gap days excluded), then percentage shares.
         Set<Date> allSplits = new Set<Date>(holidayDates);
         if (gapStart != null) {
             for (Date d = gapStart; d <= gapEnd; d = d.addDays(1)) {
@@ -57,6 +56,7 @@ public with sharing class ScheduleHoursDistributor {
         for (CategoryPlan plan : plans) {
             plan.usableDays = plan.hasRange() ? countUsableWorkdays(plan.actualStart, plan.actualEnd, allSplits, workDays) : 0;
         }
+        normalizePercentages(plans);
 
         // 4. Capacity-aware hour allocation.
         Decimal unscheduledHours = allocateHours(plans, input.numberOfHours);
@@ -158,52 +158,51 @@ public with sharing class ScheduleHoursDistributor {
         return new List<CategoryPlan>{ cat1, cat2, cat3, post };
     }
 
-    // Normalizes valid categories' percentages to total 100: the difference is split evenly and
-    // any rounding residual is assigned to the last valid category.
+    // Normalizes percentages proportionally across categories that have usable days: each category's
+    // share is its percentage divided by the total of those categories' percentages, so the configured
+    // ratios are preserved whatever the sum. If they are all zero, the hours are split evenly.
+    // Categories without usable days get a zero share. pct is the share as a percentage (2 dp,
+    // rounding residual on the last category) for reporting.
     private static void normalizePercentages(List<CategoryPlan> plans) {
-        List<CategoryPlan> validPlans = new List<CategoryPlan>();
-        Decimal sumValid = 0;
+        List<CategoryPlan> usablePlans = new List<CategoryPlan>();
+        Decimal sumPct = 0;
         for (CategoryPlan plan : plans) {
-            if (plan.valid) {
-                validPlans.add(plan);
-                sumValid += plan.inputPct;
+            if (plan.usableDays > 0) {
+                usablePlans.add(plan);
+                sumPct += plan.inputPct;
             }
         }
-        if (validPlans.isEmpty()) {
+        if (usablePlans.isEmpty()) {
             return;
         }
 
-        Decimal addEach = (100 - sumValid) / validPlans.size();
         Decimal sumRounded = 0;
-        for (CategoryPlan plan : validPlans) {
-            plan.pct = (plan.inputPct + addEach).setScale(2, System.RoundingMode.HALF_UP);
+        for (CategoryPlan plan : usablePlans) {
+            plan.share = sumPct > 0 ? plan.inputPct / sumPct : 1.0 / usablePlans.size();
+            plan.pct = (plan.share * 100).setScale(2, System.RoundingMode.HALF_UP);
             sumRounded += plan.pct;
         }
-        CategoryPlan last = validPlans[validPlans.size() - 1];
-        last.pct = (last.pct + (100 - sumRounded)).setScale(2, System.RoundingMode.HALF_UP);
+        CategoryPlan last = usablePlans[usablePlans.size() - 1];
+        last.pct += 100 - sumRounded;
     }
 
-    // Allocates hours to categories with usable days: first by normalized percentage capped at
-    // capacity (usableDays x MAX_HOURS_PER_DAY), then rolls overflow into categories with free capacity.
+    // Allocates hours to categories with usable days: first by share, capped at capacity
+    // (usableDays x MAX_HOURS_PER_DAY), then rolls overflow into categories with free capacity.
     // Sets allocatedHours and hoursPerDay on each plan and returns the hours that could not be scheduled.
     private static Decimal allocateHours(List<CategoryPlan> plans, Decimal numberOfHours) {
         List<CategoryPlan> usablePlans = new List<CategoryPlan>();
-        Decimal sumUsablePct = 0;
         for (CategoryPlan plan : plans) {
             if (plan.usableDays > 0) {
                 usablePlans.add(plan);
                 plan.capacity = plan.usableDays * MAX_HOURS_PER_DAY;
-                // Even redistribution can push a percentage below zero; treat that as zero.
-                plan.effectivePct = plan.pct < 0 ? 0 : plan.pct;
-                sumUsablePct += plan.effectivePct;
             }
         }
 
         Decimal overflowHours = numberOfHours;
 
-        // First pass: percentage share, capped by capacity.
+        // First pass: share of the requested hours, capped by capacity.
         for (CategoryPlan plan : usablePlans) {
-            Decimal target = sumUsablePct > 0 ? (numberOfHours * (plan.effectivePct / sumUsablePct)) : 0;
+            Decimal target = numberOfHours * plan.share;
             plan.allocatedHours = target <= plan.capacity ? target : plan.capacity;
             overflowHours -= plan.allocatedHours;
         }
@@ -397,9 +396,10 @@ public with sharing class ScheduleHoursDistributor {
         // Range clipped to the schedule's start/end dates.
         public Date actualStart;
         public Date actualEnd;
+        // Fraction (0..1) of the requested hours this category targets, and the same as a percentage.
+        public Decimal share = 0;
         public Decimal pct = 0;
         public Integer usableDays = 0;
-        public Decimal effectivePct = 0;
         public Decimal capacity = 0;
         public Decimal allocatedHours = 0;
         public Decimal hoursPerDay = 0;
@@ -412,7 +412,8 @@ public with sharing class ScheduleHoursDistributor {
         public void setRange(Date startDate, Date endDate, ScheduleInput input) {
             rangeStart = startDate;
             rangeEnd = endDate;
-            valid = endDate >= input.startDate && startDate <= input.endDate;
+            // A zero-week category has startDate = endDate + 1 and is never valid.
+            valid = startDate <= endDate && endDate >= input.startDate && startDate <= input.endDate;
             if (valid) {
                 actualStart = startDate > input.startDate ? startDate : input.startDate;
                 actualEnd = endDate < input.endDate ? endDate : input.endDate;
