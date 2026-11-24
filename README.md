@@ -36,7 +36,7 @@ The overall goal is to replace manual schedule exception entry with consistent, 
 4. **Onsite Logic (Optional)**
    - If an onsite period is detected (< 30 days and within the schedule range):
    - A Monday–Sunday onsite gap week is calculated.
-   - Weekday normalization is runtime-context aware so Monday is always treated as day 1 regardless of locale ordering.
+   - Weekday math is computed relative to a fixed reference Monday, so Monday is always day 1 regardless of the running user's locale.
    - The generated onsite gap exception is clamped to the input schedule range.
      - The gap week receives a zero-hour schedule exception.
      - All category allocations exclude the onsite gap.
@@ -170,6 +170,10 @@ Onsite is considered valid only if:
 
 ---
 
+## Internal Structure
+
+`processSingleSchedule` runs these steps for each input: `validate` → onsite gap week (`isOnsiteNeeded`) → `buildCategoryPlans` → `normalizePercentages` → usable-day counting → `allocateHours` → exception building. Each category (Cat1, Cat2, Cat3, Post) is represented by a private `CategoryPlan` holding its date range, normalized percentage, usable days, allocated hours and hours per day.
+
 ## Public Helper Methods
 
 The following helper methods are `public` and can be called directly in unit tests or other Apex code:
@@ -181,7 +185,7 @@ Extracts all individual dates covered by a list of schedule exceptions (used to 
 Creates and returns a single `pse__Schedule_Exception__c` record with per-day hours populated based on the `workDays` count. `workDays` is bounded to `1..7` (1 = Mon only, 5 = Mon–Fri, 7 = all days).
 
 ### `addSplitExceptions(Date segStart, Date segEnd, Decimal hoursPerDay, Integer workDays, Id scheduleId, Date inputStart, Date inputEnd, Set<Date> allSplits, List<pse__Schedule_Exception__c> allExceptions, List<pse__Schedule_Exception__c> catList)`
-Iterates a date range and splits it into contiguous segments at every holiday and onsite gap date. Each uninterrupted segment is created as a separate `pse__Schedule_Exception__c` record added to both `allExceptions` and `catList`.
+Iterates a date range and splits it into contiguous segments at every holiday and onsite gap date. Each uninterrupted segment is created as a separate `pse__Schedule_Exception__c` record added to both `allExceptions` and `catList`. Days outside `inputStart..inputEnd` also end a segment, so generated records never extend beyond the input range.
 
 ### `countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates, Integer numberOfWorkDays)`
 Counts usable days between two dates based on `numberOfWorkDays` (1-7), excluding any dates in `excludeDates` (holidays and onsite gap days).
@@ -196,7 +200,7 @@ Returns `true` when a date falls within the configured weekly work pattern (`1 =
 Returns `true` if the given date falls on Monday through Friday.
 
 ### `getNormalizedDayOfWeek(Date d)`
-Returns a normalized weekday index where **Monday = 1** and **Sunday = 7**. The method adapts to runtime locale/context ordering so downstream scheduling logic remains stable.
+Returns a weekday index where **Monday = 1** and **Sunday = 7**. It is computed from the number of days since a fixed reference Monday (2024-01-01), so it never depends on the running user's locale (unlike `Date.toStartOfWeek()`).
 
 ---
 
@@ -229,7 +233,7 @@ Private helpers keep tests short and locale-independent: `buildInput`, `setWeeks
 | `testNegativePercentages_ReturnsError` | Negative percentage values return an explicit validation error |
 | `testExistingMultiDayExceptionExcludesHolidayDates` | Selects the multi-day holiday explicitly; no generated exception overlaps it and the Post category is split exactly around it (ends 2025-03-09, resumes 2025-03-13) |
 | `testOnsiteGapWeekIsSevenDaysZeroHours` | Onsite gap exception is found by its exact computed Monday start date; asserts it is exactly 7 days spanning Monday–Sunday with all per-day hours zero |
-| `testGetNormalizedDayOfWeek_MondayIsOne` | Runtime normalization always maps Monday to 1 and Sunday to 7 |
+| `testGetNormalizedDayOfWeek_MondayIsOne` | Maps Monday to 1 … Sunday to 7, including dates before the internal reference Monday |
 | `testNumberOfWorkDaysOutOfRange_IsConsistentEverywhere` | Out-of-range `numberOfWorkDays` values are bounded consistently for usable-day counting and exception day-field population |
 | `testPercentSumLessAndGreaterThan100` | Percentages summing to < 100 or > 100 are normalized to exact per-category hours (30/20 → 55/45, 90/30 → 80/20) |
 | `testMathWithoutExistingExceptions_TotalHoursMatch` | A single Mon–Fri week schedules exactly the requested hours (10.00h/day) |

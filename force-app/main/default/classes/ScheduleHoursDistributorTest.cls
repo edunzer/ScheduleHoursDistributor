@@ -384,6 +384,10 @@ public class ScheduleHoursDistributorTest {
         System.assertEquals(5, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 7)), 'Friday should be 5');
         System.assertEquals(6, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 8)), 'Saturday should be 6');
         System.assertEquals(7, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2025, 3, 9)), 'Sunday should be 7');
+        // Dates before the internal reference Monday (2024-01-01) must normalize the same way
+        System.assertEquals(1, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2023, 12, 25)), 'Monday before the reference date should be 1');
+        System.assertEquals(7, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(2023, 12, 31)), 'Sunday before the reference date should be 7');
+        System.assertEquals(3, ScheduleHoursDistributor.getNormalizedDayOfWeek(Date.newInstance(1999, 12, 29)), 'Wednesday far in the past should be 3');
     }
 
     // ---------------------------------------------------------------------

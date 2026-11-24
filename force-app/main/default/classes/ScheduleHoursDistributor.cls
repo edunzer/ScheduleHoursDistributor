@@ -2,8 +2,10 @@ public with sharing class ScheduleHoursDistributor {
     private static final Boolean DEBUG = false;
     private static final Decimal MAX_HOURS_PER_DAY = 24;
     private static final Integer MAX_REDISTRIBUTION_PASSES = 4;
-    // Runtime-context day index for a known Monday date.
-    private static final Integer LOCALE_MONDAY_INDEX = deriveLocaleMondayIndex();
+    // Onsite periods shorter than this (and fully inside the schedule) get an onsite gap week and a Post category.
+    private static final Integer ONSITE_MAX_DAYS = 30;
+    // A known Monday. Weekday math is relative to it, so results never depend on the running user's locale.
+    private static final Date REFERENCE_MONDAY = Date.newInstance(2024, 1, 1);
 
     @InvocableMethod(label='Generate Category Schedule Exceptions' description='Generates schedule exception records for a category, skipping holidays.')
     public static List<ScheduleExceptionOutputWrapper> generateCategoryScheduleExceptions(List<ScheduleInput> inputList) {
@@ -16,7 +18,7 @@ public with sharing class ScheduleHoursDistributor {
             try {
                 outputList.add(processSingleSchedule(input));
             } catch (Exception e) {
-                outputList.add(new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 'Error: ' + e.getMessage()));
+                outputList.add(createErrorWrapper('Error: ' + e.getMessage()));
             }
         }
         return outputList;
@@ -24,238 +26,206 @@ public with sharing class ScheduleHoursDistributor {
 
     // Processes a single ScheduleInput and returns its output wrapper
     private static ScheduleExceptionOutputWrapper processSingleSchedule(ScheduleInput input) {
-        // Input validation
-        if (input == null) return new ScheduleExceptionOutputWrapper(new List<pse__Schedule_Exception__c>(), 'Error: Input cannot be null.');
-        if (input.scheduleId == null) return createErrorWrapper('Error: Schedule ID cannot be null.');
-        if (input.startDate == null) return createErrorWrapper('Error: Start Date cannot be null.');
-        if (input.endDate == null) return createErrorWrapper('Error: End Date cannot be null.');
-        if (input.startDate > input.endDate) return createErrorWrapper('Error: Start Date must be on or before End Date.');
-        if (input.numberOfHours == null) return createErrorWrapper('Error: Number of Hours cannot be null.');
-        if (input.numberOfHours <= 0) return createErrorWrapper('Error: Number of Hours must be greater than zero.');
-        if (input.numberOfWorkDays == null) return createErrorWrapper('Error: Number of Work Days cannot be null.');
-        Integer boundedWorkDays = boundWorkDays(input.numberOfWorkDays);
-        if (input.cat1Weeks == null || input.cat2Weeks == null || input.cat3Weeks == null || input.postWeeks == null)
-            return createErrorWrapper('Error: Week values cannot be null.');
-        if (input.cat1Weeks < 0 || input.cat2Weeks < 0 || input.cat3Weeks < 0 || input.postWeeks < 0)
-            return createErrorWrapper('Error: Week values cannot be negative.');
-        if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null)
-            return createErrorWrapper('Error: Percentage values cannot be null.');
-        if (input.cat1Percentage < 0 || input.cat2Percentage < 0 || input.cat3Percentage < 0 || input.postPercentage < 0)
-            return createErrorWrapper('Error: Percentage values cannot be negative.');
-        if ((input.onsiteStartDate != null && input.onsiteEndDate == null) || (input.onsiteStartDate == null && input.onsiteEndDate != null))
-            return createErrorWrapper('Error: Both Onsite Start Date and Onsite End Date must be provided.');
-        if (input.onsiteStartDate != null && input.onsiteEndDate != null && input.onsiteStartDate > input.onsiteEndDate)
-            return createErrorWrapper('Error: Onsite Start Date must be on or before Onsite End Date.');
+        String validationError = validate(input);
+        if (validationError != null) {
+            return createErrorWrapper(validationError);
+        }
 
-        // No longer return existing schedule exceptions in any scenario
-
-        // 1. Calculate holidays (still use existingExceptions for holiday exclusion, but do not return them)
+        Integer workDays = boundWorkDays(input.numberOfWorkDays);
+        // Existing exceptions are only used to block dates; they are never returned.
         Set<Date> holidayDates = extractHolidayDates(input.existingExceptions);
 
-        // 2. Onsite needed check
-        Boolean onsiteNeeded = false;
-        if (input.onsiteStartDate != null && input.onsiteEndDate != null) {
-            Integer onsiteDays = input.onsiteStartDate.daysBetween(input.onsiteEndDate) + 1;
-            onsiteNeeded = onsiteDays < 30 && input.onsiteStartDate >= input.startDate && input.onsiteEndDate <= input.endDate;
+        // 1. Onsite gap: the Monday-Sunday week containing onsiteStartDate.
+        Date gapStart = null;
+        Date gapEnd = null;
+        if (isOnsiteNeeded(input)) {
+            gapStart = mondayOfWeek(input.onsiteStartDate);
+            gapEnd = gapStart.addDays(6);
         }
 
-        // 3. Onsite gap (if needed): 1 week (Mon-Sun) containing onsiteStartDate
-        Set<Date> onsiteGapDates = new Set<Date>();
-        Date onsiteGapWeekStart = null;
-        Date onsiteGapWeekEnd = null;
-        if (onsiteNeeded) {
-            Integer dayOfWeek = getNormalizedDayOfWeek(input.onsiteStartDate); // Monday=1 ... Sunday=7
-            Integer daysToMonday = 1 - dayOfWeek;
-            onsiteGapWeekStart = input.onsiteStartDate.addDays(daysToMonday);
-            onsiteGapWeekEnd = onsiteGapWeekStart.addDays(6);
-            for (Date d = onsiteGapWeekStart; d <= onsiteGapWeekEnd; d = d.addDays(1)) {
-                onsiteGapDates.add(d);
+        // 2. Category date ranges and percentages.
+        List<CategoryPlan> plans = buildCategoryPlans(input, gapStart, gapEnd);
+        normalizePercentages(plans);
+
+        // 3. Usable days per category (holidays and onsite gap days excluded).
+        Set<Date> allSplits = new Set<Date>(holidayDates);
+        if (gapStart != null) {
+            for (Date d = gapStart; d <= gapEnd; d = d.addDays(1)) {
+                allSplits.add(d);
             }
         }
-
-        // 4. Calculate category date ranges and determine which categories are valid (work backwards)
-        Integer cat1Days = (input.cat1Weeks == null ? 0 : Integer.valueOf(input.cat1Weeks * 7));
-        Integer cat2Days = (input.cat2Weeks == null ? 0 : Integer.valueOf(input.cat2Weeks * 7));
-        Integer cat3Days = (input.cat3Weeks == null ? 0 : Integer.valueOf(input.cat3Weeks * 7));
-        Integer postDays = (input.postWeeks == null ? 0 : Integer.valueOf(input.postWeeks * 7));
-
-        Boolean postValid = onsiteNeeded;
-        Boolean cat3Valid = true;
-        Boolean cat2Valid = true;
-        Boolean cat1Valid = true;
-
-        Date postStart = null;
-        Date postEnd = null;
-        if (postValid) {
-            postStart = onsiteGapWeekEnd != null ? onsiteGapWeekEnd.addDays(1) : input.endDate.addDays(1);
-            if (postDays <= 0) {
-                postValid = false;
-            } else {
-                Date requestedPostEnd = postStart.addDays(postDays - 1);
-                postEnd = (requestedPostEnd < input.endDate) ? requestedPostEnd : input.endDate;
-                if (postStart > postEnd) {
-                    postValid = false;
-                }
-            }
+        for (CategoryPlan plan : plans) {
+            plan.usableDays = plan.hasRange() ? countUsableWorkdays(plan.actualStart, plan.actualEnd, allSplits, workDays) : 0;
         }
 
-        Date cat3End = postValid ? onsiteGapWeekStart.addDays(-1) : input.endDate;
-        Date cat3Start = cat3End.addDays(-cat3Days + 1);
+        // 4. Capacity-aware hour allocation.
+        Decimal unscheduledHours = allocateHours(plans, input.numberOfHours);
 
-        Date cat2End = cat3Start.addDays(-1);
-        Date cat2Start = cat2End.addDays(-cat2Days + 1);
-
-        Date cat1End = cat2Start.addDays(-1);
-        Date cat1Start = cat1End.addDays(-cat1Days + 1);
-
-        cat1Valid = (cat1End >= input.startDate && cat1Start <= input.endDate);
-        cat2Valid = (cat2End >= input.startDate && cat2Start <= input.endDate);
-        cat3Valid = (cat3End >= input.startDate && cat3Start <= input.endDate);
-        postValid = (postValid && postStart != null && postEnd != null && postEnd >= input.startDate && postStart <= input.endDate);
-
-        Date cat1ActualStart = cat1Valid ? (cat1Start > input.startDate ? cat1Start : input.startDate) : null;
-        Date cat1ActualEnd = cat1Valid ? (cat1End < input.endDate ? cat1End : input.endDate) : null;
-        Date cat2ActualStart = cat2Valid ? (cat2Start > input.startDate ? cat2Start : input.startDate) : null;
-        Date cat2ActualEnd = cat2Valid ? (cat2End < input.endDate ? cat2End : input.endDate) : null;
-        Date cat3ActualStart = cat3Valid ? (cat3Start > input.startDate ? cat3Start : input.startDate) : null;
-        Date cat3ActualEnd = cat3Valid ? (cat3End < input.endDate ? cat3End : input.endDate) : null;
-        Date postActualStart = postValid ? (postStart > input.startDate ? postStart : input.startDate) : null;
-        Date postActualEnd = postValid ? (postEnd < input.endDate ? postEnd : input.endDate) : null;
-
-        Decimal cat1Pct = 0, cat2Pct = 0, cat3Pct = 0, postPct = 0;
-        List<Decimal> origPcts = new List<Decimal>();
-        List<String> validCats = new List<String>();
-        if (cat1Valid) { validCats.add('cat1'); origPcts.add(input.cat1Percentage); }
-        if (cat2Valid) { validCats.add('cat2'); origPcts.add(input.cat2Percentage); }
-        if (cat3Valid) { validCats.add('cat3'); origPcts.add(input.cat3Percentage); }
-        if (postValid) { validCats.add('post'); origPcts.add(input.postPercentage); }
-        Integer validCount = validCats.size();
-        Decimal sumValid = 0;
-        for (Decimal pct : origPcts) sumValid += pct;
-        Decimal diff = 100 - sumValid;
-        Decimal addEach = validCount > 0 ? diff / validCount : 0;
-        Integer idx = 0;
-        for (String cat : validCats) {
-            Decimal pct = (origPcts[idx] + addEach);
-            pct = pct.setScale(2, System.RoundingMode.HALF_UP);
-            if (cat == 'cat1') cat1Pct = pct;
-            if (cat == 'cat2') cat2Pct = pct;
-            if (cat == 'cat3') cat3Pct = pct;
-            if (cat == 'post') postPct = pct;
-            idx++;
-        }
-        if (validCount > 0) {
-            Decimal sumRounded = 0;
-            if (cat1Valid) sumRounded += cat1Pct;
-            if (cat2Valid) sumRounded += cat2Pct;
-            if (cat3Valid) sumRounded += cat3Pct;
-            if (postValid) sumRounded += postPct;
-            Decimal residual = 100 - sumRounded;
-            String lastCat = validCats[validCount - 1];
-            if (lastCat == 'cat1') cat1Pct = (cat1Pct + residual).setScale(2, System.RoundingMode.HALF_UP);
-            if (lastCat == 'cat2') cat2Pct = (cat2Pct + residual).setScale(2, System.RoundingMode.HALF_UP);
-            if (lastCat == 'cat3') cat3Pct = (cat3Pct + residual).setScale(2, System.RoundingMode.HALF_UP);
-            if (lastCat == 'post') postPct = (postPct + residual).setScale(2, System.RoundingMode.HALF_UP);
-        }
-
+        // 5. Build exceptions: onsite gap (zero hours) first, then categories in order.
         List<pse__Schedule_Exception__c> allExceptions = new List<pse__Schedule_Exception__c>();
-
-        if (onsiteNeeded && onsiteGapWeekStart != null && onsiteGapWeekEnd != null) {
-            Date onsiteSegmentStart = (onsiteGapWeekStart < input.startDate) ? input.startDate : onsiteGapWeekStart;
-            Date onsiteSegmentEnd = (onsiteGapWeekEnd > input.endDate) ? input.endDate : onsiteGapWeekEnd;
-            if (onsiteSegmentStart <= onsiteSegmentEnd) {
-                addSplitExceptions(
-                    onsiteSegmentStart, onsiteSegmentEnd, 0, boundedWorkDays, input.scheduleId,
-                    input.startDate, input.endDate, holidayDates, allExceptions, new List<pse__Schedule_Exception__c>()
+        if (gapStart != null) {
+            Date gapSegStart = gapStart < input.startDate ? input.startDate : gapStart;
+            Date gapSegEnd = gapEnd > input.endDate ? input.endDate : gapEnd;
+            allExceptions.addAll(buildSplitExceptions(gapSegStart, gapSegEnd, 0, workDays, input.scheduleId, input.startDate, input.endDate, holidayDates));
+        }
+        for (CategoryPlan plan : plans) {
+            if (plan.hasRange()) {
+                allExceptions.addAll(
+                    buildSplitExceptions(plan.actualStart, plan.actualEnd, plan.hoursPerDay, workDays, input.scheduleId, input.startDate, input.endDate, allSplits)
                 );
             }
         }
 
-        Set<Date> allSplits = new Set<Date>();
-        allSplits.addAll(holidayDates);
-        allSplits.addAll(onsiteGapDates);
-
-        Map<String, List<pse__Schedule_Exception__c>> catExceptions = new Map<String, List<pse__Schedule_Exception__c>>{
-            'cat1' => new List<pse__Schedule_Exception__c>(),
-            'cat2' => new List<pse__Schedule_Exception__c>(),
-            'cat3' => new List<pse__Schedule_Exception__c>(),
-            'post' => new List<pse__Schedule_Exception__c>()
-        };
-
-        Integer cat1UsableDays = (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd)
-            ? countUsableWorkdays(cat1ActualStart, cat1ActualEnd, allSplits, boundedWorkDays) : 0;
-        Integer cat2UsableDays = (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd)
-            ? countUsableWorkdays(cat2ActualStart, cat2ActualEnd, allSplits, boundedWorkDays) : 0;
-        Integer cat3UsableDays = (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd)
-            ? countUsableWorkdays(cat3ActualStart, cat3ActualEnd, allSplits, boundedWorkDays) : 0;
-        Integer postUsableDays = (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd)
-            ? countUsableWorkdays(postActualStart, postActualEnd, allSplits, boundedWorkDays) : 0;
-
-        Map<String, Decimal> hoursPerDayMap = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
-        List<String> usableCats = new List<String>();
-        Map<String, Integer> usableDaysMap = new Map<String, Integer>{'cat1' => cat1UsableDays, 'cat2' => cat2UsableDays, 'cat3' => cat3UsableDays, 'post' => postUsableDays};
-        Map<String, Decimal> pctByCat = new Map<String, Decimal>{
-            'cat1' => (cat1Pct == null ? 0 : cat1Pct),
-            'cat2' => (cat2Pct == null ? 0 : cat2Pct),
-            'cat3' => (cat3Pct == null ? 0 : cat3Pct),
-            'post' => (postPct == null ? 0 : postPct)
-        };
-        Map<String, Decimal> effectivePctByCat = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
-
-        if (cat1UsableDays > 0) usableCats.add('cat1');
-        if (cat2UsableDays > 0) usableCats.add('cat2');
-        if (cat3UsableDays > 0) usableCats.add('cat3');
-        if (postUsableDays > 0) usableCats.add('post');
-
-        Map<String, Decimal> capacityByCat = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
-        Map<String, Decimal> allocatedByCat = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
-        Map<String, Decimal> freeCapacityByCat = new Map<String, Decimal>{'cat1' => 0, 'cat2' => 0, 'cat3' => 0, 'post' => 0};
-
-        Decimal sumUsablePct = 0;
-        for (String cat : usableCats) {
-            Integer uDays = usableDaysMap.get(cat);
-            Decimal capacity = (uDays == null || uDays <= 0) ? 0 : (uDays * MAX_HOURS_PER_DAY);
-            capacityByCat.put(cat, capacity);
-            freeCapacityByCat.put(cat, capacity);
-            Decimal rawPct = pctByCat.get(cat) == null ? 0 : pctByCat.get(cat);
-            Decimal boundedPct = rawPct < 0 ? 0 : rawPct;
-            effectivePctByCat.put(cat, boundedPct);
-            sumUsablePct += boundedPct;
+        if (DEBUG) {
+            for (CategoryPlan plan : plans) {
+                System.debug(plan);
+            }
+            System.debug('allSplits=' + allSplits + ', unscheduledHours=' + unscheduledHours);
         }
 
-        Decimal overflowHours = input.numberOfHours == null ? 0 : input.numberOfHours;
+        return new ScheduleExceptionOutputWrapper(allExceptions, null);
+    }
 
-        // First pass: assign by normalized percentage across categories that have usable days, capped by per-category capacity.
-        for (String cat : usableCats) {
-            Decimal pct = effectivePctByCat.get(cat) == null ? 0 : effectivePctByCat.get(cat);
-            Decimal target = sumUsablePct > 0 ? (input.numberOfHours * (pct / sumUsablePct)) : 0;
-            Decimal capacity = capacityByCat.get(cat);
-            Decimal assigned = target <= capacity ? target : capacity;
-            allocatedByCat.put(cat, assigned);
-            freeCapacityByCat.put(cat, capacity - assigned);
-            overflowHours -= assigned;
+    // Returns an error message for invalid input, or null when the input is valid.
+    private static String validate(ScheduleInput input) {
+        if (input == null) return 'Error: Input cannot be null.';
+        if (input.scheduleId == null) return 'Error: Schedule ID cannot be null.';
+        if (input.startDate == null) return 'Error: Start Date cannot be null.';
+        if (input.endDate == null) return 'Error: End Date cannot be null.';
+        if (input.startDate > input.endDate) return 'Error: Start Date must be on or before End Date.';
+        if (input.numberOfHours == null) return 'Error: Number of Hours cannot be null.';
+        if (input.numberOfHours <= 0) return 'Error: Number of Hours must be greater than zero.';
+        if (input.numberOfWorkDays == null) return 'Error: Number of Work Days cannot be null.';
+        if (input.cat1Weeks == null || input.cat2Weeks == null || input.cat3Weeks == null || input.postWeeks == null) {
+            return 'Error: Week values cannot be null.';
+        }
+        if (input.cat1Weeks < 0 || input.cat2Weeks < 0 || input.cat3Weeks < 0 || input.postWeeks < 0) {
+            return 'Error: Week values cannot be negative.';
+        }
+        if (input.cat1Percentage == null || input.cat2Percentage == null || input.cat3Percentage == null || input.postPercentage == null) {
+            return 'Error: Percentage values cannot be null.';
+        }
+        if (input.cat1Percentage < 0 || input.cat2Percentage < 0 || input.cat3Percentage < 0 || input.postPercentage < 0) {
+            return 'Error: Percentage values cannot be negative.';
+        }
+        if ((input.onsiteStartDate == null) != (input.onsiteEndDate == null)) {
+            return 'Error: Both Onsite Start Date and Onsite End Date must be provided.';
+        }
+        if (input.onsiteStartDate != null && input.onsiteStartDate > input.onsiteEndDate) {
+            return 'Error: Onsite Start Date must be on or before Onsite End Date.';
+        }
+        return null;
+    }
+
+    // Onsite handling applies only when the onsite period is short and fully inside the schedule.
+    private static Boolean isOnsiteNeeded(ScheduleInput input) {
+        if (input.onsiteStartDate == null || input.onsiteEndDate == null) {
+            return false;
+        }
+        Integer onsiteDays = input.onsiteStartDate.daysBetween(input.onsiteEndDate) + 1;
+        return onsiteDays < ONSITE_MAX_DAYS && input.onsiteStartDate >= input.startDate && input.onsiteEndDate <= input.endDate;
+    }
+
+    // Builds the category plans in output order (cat1, cat2, cat3, post).
+    // Post (onsite only) starts the day after the onsite gap week. Cat3, Cat2 and Cat1 are laid out backwards
+    // from the day before the gap week (when Post applies) or from the schedule end date.
+    private static List<CategoryPlan> buildCategoryPlans(ScheduleInput input, Date gapStart, Date gapEnd) {
+        CategoryPlan post = new CategoryPlan('post', input.postPercentage);
+        if (gapStart != null) {
+            Integer postDays = weeksToDays(input.postWeeks);
+            if (postDays > 0) {
+                Date postStart = gapEnd.addDays(1);
+                Date requestedPostEnd = postStart.addDays(postDays - 1);
+                Date postEnd = requestedPostEnd < input.endDate ? requestedPostEnd : input.endDate;
+                if (postStart <= postEnd) {
+                    post.setRange(postStart, postEnd, input);
+                }
+            }
+        }
+
+        // Each category ends the day before the following one starts.
+        Date followingStart = post.valid ? gapStart : input.endDate.addDays(1);
+
+        CategoryPlan cat3 = new CategoryPlan('cat3', input.cat3Percentage);
+        cat3.setRange(followingStart.addDays(-weeksToDays(input.cat3Weeks)), followingStart.addDays(-1), input);
+
+        CategoryPlan cat2 = new CategoryPlan('cat2', input.cat2Percentage);
+        cat2.setRange(cat3.rangeStart.addDays(-weeksToDays(input.cat2Weeks)), cat3.rangeStart.addDays(-1), input);
+
+        CategoryPlan cat1 = new CategoryPlan('cat1', input.cat1Percentage);
+        cat1.setRange(cat2.rangeStart.addDays(-weeksToDays(input.cat1Weeks)), cat2.rangeStart.addDays(-1), input);
+
+        return new List<CategoryPlan>{ cat1, cat2, cat3, post };
+    }
+
+    // Normalizes valid categories' percentages to total 100: the difference is split evenly and
+    // any rounding residual is assigned to the last valid category.
+    private static void normalizePercentages(List<CategoryPlan> plans) {
+        List<CategoryPlan> validPlans = new List<CategoryPlan>();
+        Decimal sumValid = 0;
+        for (CategoryPlan plan : plans) {
+            if (plan.valid) {
+                validPlans.add(plan);
+                sumValid += plan.inputPct;
+            }
+        }
+        if (validPlans.isEmpty()) {
+            return;
+        }
+
+        Decimal addEach = (100 - sumValid) / validPlans.size();
+        Decimal sumRounded = 0;
+        for (CategoryPlan plan : validPlans) {
+            plan.pct = (plan.inputPct + addEach).setScale(2, System.RoundingMode.HALF_UP);
+            sumRounded += plan.pct;
+        }
+        CategoryPlan last = validPlans[validPlans.size() - 1];
+        last.pct = (last.pct + (100 - sumRounded)).setScale(2, System.RoundingMode.HALF_UP);
+    }
+
+    // Allocates hours to categories with usable days: first by normalized percentage capped at
+    // capacity (usableDays x MAX_HOURS_PER_DAY), then rolls overflow into categories with free capacity.
+    // Sets allocatedHours and hoursPerDay on each plan and returns the hours that could not be scheduled.
+    private static Decimal allocateHours(List<CategoryPlan> plans, Decimal numberOfHours) {
+        List<CategoryPlan> usablePlans = new List<CategoryPlan>();
+        Decimal sumUsablePct = 0;
+        for (CategoryPlan plan : plans) {
+            if (plan.usableDays > 0) {
+                usablePlans.add(plan);
+                plan.capacity = plan.usableDays * MAX_HOURS_PER_DAY;
+                // Even redistribution can push a percentage below zero; treat that as zero.
+                plan.effectivePct = plan.pct < 0 ? 0 : plan.pct;
+                sumUsablePct += plan.effectivePct;
+            }
+        }
+
+        Decimal overflowHours = numberOfHours;
+
+        // First pass: percentage share, capped by capacity.
+        for (CategoryPlan plan : usablePlans) {
+            Decimal target = sumUsablePct > 0 ? (numberOfHours * (plan.effectivePct / sumUsablePct)) : 0;
+            plan.allocatedHours = target <= plan.capacity ? target : plan.capacity;
+            overflowHours -= plan.allocatedHours;
         }
 
         // Additional passes: roll overflow into categories with remaining capacity.
         Integer passes = 0;
         while (overflowHours > 0 && passes < MAX_REDISTRIBUTION_PASSES) {
             Decimal totalFree = 0;
-            for (String cat : usableCats) {
-                Decimal free = freeCapacityByCat.get(cat);
-                if (free > 0) totalFree += free;
+            for (CategoryPlan plan : usablePlans) {
+                if (plan.freeCapacity() > 0) totalFree += plan.freeCapacity();
             }
             if (totalFree <= 0) {
                 break;
             }
 
             Decimal distributed = 0;
-            for (String cat : usableCats) {
-                Decimal free = freeCapacityByCat.get(cat);
+            for (CategoryPlan plan : usablePlans) {
+                Decimal free = plan.freeCapacity();
                 if (free <= 0) continue;
                 Decimal share = overflowHours * (free / totalFree);
                 Decimal add = share <= free ? share : free;
-                allocatedByCat.put(cat, allocatedByCat.get(cat) + add);
-                freeCapacityByCat.put(cat, free - add);
+                plan.allocatedHours += add;
                 distributed += add;
             }
 
@@ -266,44 +236,20 @@ public with sharing class ScheduleHoursDistributor {
             passes++;
         }
 
-        // Convert final category assignments into per-day hours, clamped by max/day and rounded down.
-        for (String cat : usableCats) {
-            Integer uDays = usableDaysMap.get(cat);
-            Decimal assigned = allocatedByCat.get(cat);
-            Decimal hpd = (uDays != null && uDays > 0) ? (assigned / uDays).setScale(2, System.RoundingMode.DOWN) : 0;
+        // Convert allocations into per-day hours, rounded down and clamped to [0, MAX_HOURS_PER_DAY].
+        for (CategoryPlan plan : usablePlans) {
+            Decimal hpd = (plan.allocatedHours / plan.usableDays).setScale(2, System.RoundingMode.DOWN);
             if (hpd > MAX_HOURS_PER_DAY) hpd = MAX_HOURS_PER_DAY;
             if (hpd < 0) hpd = 0;
-            hoursPerDayMap.put(cat, hpd);
+            plan.hoursPerDay = hpd;
         }
 
-        Decimal cat1HoursPerDay = hoursPerDayMap.get('cat1');
-        Decimal cat2HoursPerDay = hoursPerDayMap.get('cat2');
-        Decimal cat3HoursPerDay = hoursPerDayMap.get('cat3');
-        Decimal postHoursPerDay = hoursPerDayMap.get('post');
+        return overflowHours;
+    }
 
-        if (DEBUG) {
-            System.debug('CAT1: start=' + cat1ActualStart + ', end=' + cat1ActualEnd + ', usableDays=' + cat1UsableDays + ', pct=' + cat1Pct + ', hoursPerDay=' + cat1HoursPerDay);
-            System.debug('CAT2: start=' + cat2ActualStart + ', end=' + cat2ActualEnd + ', usableDays=' + cat2UsableDays + ', pct=' + cat2Pct + ', hoursPerDay=' + cat2HoursPerDay);
-            System.debug('CAT3: start=' + cat3ActualStart + ', end=' + cat3ActualEnd + ', usableDays=' + cat3UsableDays + ', pct=' + cat3Pct + ', hoursPerDay=' + cat3HoursPerDay);
-            System.debug('POST: start=' + postActualStart + ', end=' + postActualEnd + ', usableDays=' + postUsableDays + ', pct=' + postPct + ', hoursPerDay=' + postHoursPerDay);
-            System.debug('allSplits (holidays+onsiteGap): ' + allSplits);
-            System.debug('allocatedByCat=' + allocatedByCat + ', freeCapacityByCat=' + freeCapacityByCat + ', unscheduledHours=' + overflowHours);
-        }
-
-        if (cat1Valid && cat1ActualStart != null && cat1ActualEnd != null && cat1ActualStart <= cat1ActualEnd) {
-            ScheduleHoursDistributor.addSplitExceptions(cat1ActualStart, cat1ActualEnd, cat1HoursPerDay, boundedWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat1'));
-        }
-        if (cat2Valid && cat2ActualStart != null && cat2ActualEnd != null && cat2ActualStart <= cat2ActualEnd) {
-            ScheduleHoursDistributor.addSplitExceptions(cat2ActualStart, cat2ActualEnd, cat2HoursPerDay, boundedWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat2'));
-        }
-        if (cat3Valid && cat3ActualStart != null && cat3ActualEnd != null && cat3ActualStart <= cat3ActualEnd) {
-            ScheduleHoursDistributor.addSplitExceptions(cat3ActualStart, cat3ActualEnd, cat3HoursPerDay, boundedWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('cat3'));
-        }
-        if (postValid && postActualStart != null && postActualEnd != null && postActualStart <= postActualEnd) {
-            ScheduleHoursDistributor.addSplitExceptions(postActualStart, postActualEnd, postHoursPerDay, boundedWorkDays, input.scheduleId, input.startDate, input.endDate, allSplits, allExceptions, catExceptions.get('post'));
-        }
-
-        return new ScheduleExceptionOutputWrapper(allExceptions, null);
+    // Week counts are converted to whole days (weeks x 7, decimals truncated).
+    private static Integer weeksToDays(Decimal weeks) {
+        return Integer.valueOf(weeks * 7);
     }
 
     // Helper: create a single error wrapper
@@ -344,44 +290,63 @@ public with sharing class ScheduleHoursDistributor {
         );
     }
 
-    // Helper: Adds split exceptions for a category, splitting at every holiday and onsite gap day
+    // Helper: Adds split exceptions for a category, splitting at every holiday and onsite gap day.
+    // Each created exception is added to both allExceptions and catList.
     public static void addSplitExceptions(
-        Date segStart, Date segEnd, Decimal hoursPerDay, Integer workDays, Id scheduleId, Date inputStart, Date inputEnd, Set<Date> allSplits, List<pse__Schedule_Exception__c> allExceptions, List<pse__Schedule_Exception__c> catList
+        Date segStart,
+        Date segEnd,
+        Decimal hoursPerDay,
+        Integer workDays,
+        Id scheduleId,
+        Date inputStart,
+        Date inputEnd,
+        Set<Date> allSplits,
+        List<pse__Schedule_Exception__c> allExceptions,
+        List<pse__Schedule_Exception__c> catList
     ) {
-        Date currStart = null;
-        for (Date d = segStart; d <= segEnd.addDays(1); d = d.addDays(1)) {
-            Boolean isSplit = (d > segEnd) || allSplits.contains(d);
-            if (currStart == null && !allSplits.contains(d) && d >= inputStart && d <= inputEnd) {
-                currStart = d;
-            } else if (currStart != null && !isSplit && d >= inputStart && d <= inputEnd) {
-                // continue current segment
-            } else if (currStart != null && isSplit) {
-                pse__Schedule_Exception__c exc = createScheduleException(scheduleId, currStart, d.addDays(-1), workDays, hoursPerDay);
-                allExceptions.add(exc);
-                catList.add(exc);
-                currStart = null;
+        List<pse__Schedule_Exception__c> created = buildSplitExceptions(segStart, segEnd, hoursPerDay, workDays, scheduleId, inputStart, inputEnd, allSplits);
+        allExceptions.addAll(created);
+        catList.addAll(created);
+    }
+
+    // Returns one exception per uninterrupted run of days in [segStart, segEnd] that is inside
+    // [inputStart, inputEnd] and not in splitDates.
+    private static List<pse__Schedule_Exception__c> buildSplitExceptions(
+        Date segStart,
+        Date segEnd,
+        Decimal hoursPerDay,
+        Integer workDays,
+        Id scheduleId,
+        Date inputStart,
+        Date inputEnd,
+        Set<Date> splitDates
+    ) {
+        List<pse__Schedule_Exception__c> created = new List<pse__Schedule_Exception__c>();
+        Date runStart = null;
+        for (Date d = segStart; d <= segEnd; d = d.addDays(1)) {
+            Boolean isOpen = !splitDates.contains(d) && d >= inputStart && d <= inputEnd;
+            if (isOpen && runStart == null) {
+                runStart = d;
+            } else if (!isOpen && runStart != null) {
+                created.add(createScheduleException(scheduleId, runStart, d.addDays(-1), workDays, hoursPerDay));
+                runStart = null;
             }
         }
+        if (runStart != null) {
+            created.add(createScheduleException(scheduleId, runStart, segEnd, workDays, hoursPerDay));
+        }
+        return created;
     }
 
     // Helper: Counts usable workdays between two dates, excluding holidays and onsite gap days.
     // Workday pattern follows numberOfWorkDays: 1=Mon only ... 5=Mon-Fri, 6=Mon-Sat, 7=Mon-Sun.
     public static Integer countUsableWorkdays(Date start, Date endDate, Set<Date> excludeDates, Integer numberOfWorkDays) {
         Integer boundedWorkDays = boundWorkDays(numberOfWorkDays);
-
         Integer count = 0;
         for (Date d = start; d <= endDate; d = d.addDays(1)) {
-            Boolean scheduledWorkday = isScheduledWorkday(d, boundedWorkDays);
-            Boolean excluded = excludeDates.contains(d);
-            if (scheduledWorkday && !excluded) {
+            if (isScheduledWorkday(d, boundedWorkDays) && !excludeDates.contains(d)) {
                 count++;
             }
-            if (DEBUG) {
-                System.debug('countUsableWorkdays: date=' + d + ', isScheduledWorkday=' + scheduledWorkday + ', isExcluded=' + excluded + ', runningCount=' + count + ', numberOfWorkDays=' + boundedWorkDays);
-            }
-        }
-        if (DEBUG) {
-            System.debug('countUsableWorkdays: FINAL count for range ' + start + ' to ' + endDate + ' (excludes=' + excludeDates + ', numberOfWorkDays=' + boundedWorkDays + ') = ' + count);
         }
         return count;
     }
@@ -391,25 +356,21 @@ public with sharing class ScheduleHoursDistributor {
         return countUsableWorkdays(start, endDate, excludeDates, 5);
     }
 
-    // Helper: Returns normalized day-of-week where Monday=1 and Sunday=7.
+    // Helper: Returns day-of-week where Monday=1 and Sunday=7, independent of the user's locale.
     public static Integer getNormalizedDayOfWeek(Date d) {
-        // Normalize locale/context-dependent weekday numbering to Monday=1 ... Sunday=7.
-        Integer localeDow = d.toStartOfWeek().daysBetween(d) + 1;
-        Integer normalized = Math.mod(localeDow - LOCALE_MONDAY_INDEX + 7, 7) + 1;
-        return normalized;
+        Integer offset = Math.mod(REFERENCE_MONDAY.daysBetween(d), 7);
+        if (offset < 0) offset += 7;
+        return offset + 1;
     }
 
-    // Helper: Derives the runtime/context locale index for a known Monday date.
-    private static Integer deriveLocaleMondayIndex() {
-        Date knownMonday = Date.newInstance(2024, 1, 1); // Monday
-        return knownMonday.toStartOfWeek().daysBetween(knownMonday) + 1;
+    // Helper: Returns the Monday of the week containing d.
+    private static Date mondayOfWeek(Date d) {
+        return d.addDays(1 - getNormalizedDayOfWeek(d));
     }
 
     // Helper: Returns true if date is one of the configured workdays for the week.
     public static Boolean isScheduledWorkday(Date d, Integer numberOfWorkDays) {
-        Integer boundedWorkDays = boundWorkDays(numberOfWorkDays);
-        Integer dow = getNormalizedDayOfWeek(d); // 1=Monday, 7=Sunday
-        return dow >= 1 && dow <= boundedWorkDays;
+        return getNormalizedDayOfWeek(d) <= boundWorkDays(numberOfWorkDays);
     }
 
     // Helper: Clamps workdays to supported range [1..7], defaulting to 5 when null.
@@ -422,10 +383,50 @@ public with sharing class ScheduleHoursDistributor {
 
     // Helper: Returns true if the date is a weekday (Mon-Fri)
     public static Boolean isWeekday(Date d) {
-        Integer dow = getNormalizedDayOfWeek(d); // 1=Monday, 7=Sunday
-        return dow >= 1 && dow <= 5;
+        return getNormalizedDayOfWeek(d) <= 5;
     }
 
+    // Working state for one category (cat1, cat2, cat3 or post) while a schedule is processed.
+    private class CategoryPlan {
+        public String key;
+        public Decimal inputPct;
+        // Raw range before clipping to the schedule (may be empty when weeks = 0).
+        public Date rangeStart;
+        public Date rangeEnd;
+        public Boolean valid = false;
+        // Range clipped to the schedule's start/end dates.
+        public Date actualStart;
+        public Date actualEnd;
+        public Decimal pct = 0;
+        public Integer usableDays = 0;
+        public Decimal effectivePct = 0;
+        public Decimal capacity = 0;
+        public Decimal allocatedHours = 0;
+        public Decimal hoursPerDay = 0;
+
+        public CategoryPlan(String key, Decimal inputPct) {
+            this.key = key;
+            this.inputPct = inputPct;
+        }
+
+        public void setRange(Date startDate, Date endDate, ScheduleInput input) {
+            rangeStart = startDate;
+            rangeEnd = endDate;
+            valid = endDate >= input.startDate && startDate <= input.endDate;
+            if (valid) {
+                actualStart = startDate > input.startDate ? startDate : input.startDate;
+                actualEnd = endDate < input.endDate ? endDate : input.endDate;
+            }
+        }
+
+        public Boolean hasRange() {
+            return valid && actualStart <= actualEnd;
+        }
+
+        public Decimal freeCapacity() {
+            return capacity - allocatedHours;
+        }
+    }
 
     // Wrapper class: Holds output schedule exceptions and calculated values
     public class ScheduleExceptionOutputWrapper {
@@ -435,10 +436,7 @@ public with sharing class ScheduleHoursDistributor {
         @InvocableVariable(label='Error Message' description='Error encountered during execution')
         public String errorMessage;
 
-        public ScheduleExceptionOutputWrapper(
-            List<pse__Schedule_Exception__c> exceptions,
-            String error
-        ) {
+        public ScheduleExceptionOutputWrapper(List<pse__Schedule_Exception__c> exceptions, String error) {
             this.scheduleExceptions = exceptions;
             this.errorMessage = error;
         }
@@ -446,26 +444,40 @@ public with sharing class ScheduleHoursDistributor {
 
     // Input wrapper class: Holds parameters from Flow for schedule generation
     public class ScheduleInput {
-        @InvocableVariable(label='Onsite Start Date') public Date onsiteStartDate;
-        @InvocableVariable(label='Onsite End Date') public Date onsiteEndDate;
-        @InvocableVariable(label='Schedule ID') public Id scheduleId;
-        @InvocableVariable(label='Start Date') public Date startDate;
-        @InvocableVariable(label='End Date') public Date endDate;
-        @InvocableVariable(label='Number of Hours') public Decimal numberOfHours;
-        @InvocableVariable(label='Number of Work Days') public Integer numberOfWorkDays;
+        @InvocableVariable(label='Onsite Start Date')
+        public Date onsiteStartDate;
+        @InvocableVariable(label='Onsite End Date')
+        public Date onsiteEndDate;
+        @InvocableVariable(label='Schedule ID')
+        public Id scheduleId;
+        @InvocableVariable(label='Start Date')
+        public Date startDate;
+        @InvocableVariable(label='End Date')
+        public Date endDate;
+        @InvocableVariable(label='Number of Hours')
+        public Decimal numberOfHours;
+        @InvocableVariable(label='Number of Work Days')
+        public Integer numberOfWorkDays;
 
-        @InvocableVariable(label='Category 1 Weeks') public Decimal cat1Weeks;
-        @InvocableVariable(label='Category 2 Weeks') public Decimal cat2Weeks;
-        @InvocableVariable(label='Category 3 Weeks') public Decimal cat3Weeks;
-        @InvocableVariable(label='Post Weeks') public Decimal postWeeks;
+        @InvocableVariable(label='Category 1 Weeks')
+        public Decimal cat1Weeks;
+        @InvocableVariable(label='Category 2 Weeks')
+        public Decimal cat2Weeks;
+        @InvocableVariable(label='Category 3 Weeks')
+        public Decimal cat3Weeks;
+        @InvocableVariable(label='Post Weeks')
+        public Decimal postWeeks;
 
-        @InvocableVariable(label='Category 1 Percentage') public Decimal cat1Percentage;
-        @InvocableVariable(label='Category 2 Percentage') public Decimal cat2Percentage;
-        @InvocableVariable(label='Category 3 Percentage') public Decimal cat3Percentage;
-        @InvocableVariable(label='Post Percentage') public Decimal postPercentage;
+        @InvocableVariable(label='Category 1 Percentage')
+        public Decimal cat1Percentage;
+        @InvocableVariable(label='Category 2 Percentage')
+        public Decimal cat2Percentage;
+        @InvocableVariable(label='Category 3 Percentage')
+        public Decimal cat3Percentage;
+        @InvocableVariable(label='Post Percentage')
+        public Decimal postPercentage;
 
-        @InvocableVariable(label='Existing Schedule Exceptions') 
+        @InvocableVariable(label='Existing Schedule Exceptions')
         public List<pse__Schedule_Exception__c> existingExceptions;
-        
     }
 }
