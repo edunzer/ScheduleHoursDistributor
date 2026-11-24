@@ -49,10 +49,10 @@ The overall goal is to replace manual schedule exception entry with consistent, 
    - Each category is trimmed to the overall schedule window.
    - Categories that do not overlap the schedule are ignored.
 
-6. **Percentage Redistribution**
-   - Only valid categories are included.
-   - Percentages are normalized so the total always equals 100%.
-   - Any unused or excess percentage is redistributed evenly.
+6. **Percentage Normalization**
+   - Only categories with at least one usable day are included (zero-week categories, and categories whose days are all holidays/gap days, are ignored).
+   - Percentages are scaled **proportionally** so they total 100% and the configured ratios are preserved (e.g. `30/20` → `60/40`, `90/30` → `75/25`).
+   - If every included percentage is 0, hours are split evenly.
 
 7. **Hour Distribution**
    - Usable days are counted per category using `numberOfWorkDays`.
@@ -144,7 +144,7 @@ The method returns one wrapper per input containing:
 - Usable-day counting uses the same `numberOfWorkDays` pattern as hour assignment
 - Out-of-range `numberOfWorkDays` inputs are consistently bounded to `1..7` across both day counting and schedule-exception day fields
 - Holidays and onsite gap days are **always excluded**
-- Category percentages are **normalized** so valid categories total **100%**
+- Category percentages are **normalized proportionally** across categories with usable days so they total **100%** (all zeros → even split)
 - Capacity is calculated per category as `usableDays × 24`
 - Initial assignment is percentage-based, then capped by category capacity
 - Overflow is rolled into other categories with available capacity
@@ -235,7 +235,10 @@ Private helpers keep tests short and locale-independent: `buildInput`, `setWeeks
 | `testOnsiteGapWeekIsSevenDaysZeroHours` | Onsite gap exception is found by its exact computed Monday start date; asserts it is exactly 7 days spanning Monday–Sunday with all per-day hours zero |
 | `testGetNormalizedDayOfWeek_MondayIsOne` | Maps Monday to 1 … Sunday to 7, including dates before the internal reference Monday |
 | `testNumberOfWorkDaysOutOfRange_IsConsistentEverywhere` | Out-of-range `numberOfWorkDays` values are bounded consistently for usable-day counting and exception day-field population |
-| `testPercentSumLessAndGreaterThan100` | Percentages summing to < 100 or > 100 are normalized to exact per-category hours (30/20 → 55/45, 90/30 → 80/20) |
+| `testPercentSumLessAndGreaterThan100` | Percentages summing to < 100 or > 100 are normalized proportionally to exact per-category hours (30/20 → 60/40, 90/30 → 75/25) |
+| `testAllZeroPercentagesSplitEvenly` | All-zero percentages split hours evenly across categories |
+| `testZeroWeekCategoryInMiddleDoesNotDistortShares` | A zero-week category between two others is ignored; the remaining 60 : 20 ratio yields exactly 75h / 25h |
+| `testCategoryWithNoUsableDaysIsExcludedFromShares` | A category whose weekdays are all holidays gets 0h and doesn't affect the other categories' ratio |
 | `testMathWithoutExistingExceptions_TotalHoursMatch` | A single Mon–Fri week schedules exactly the requested hours (10.00h/day) |
 | `testMathWithExistingHolidayExcludesDate_TotalHoursMatch` | Holiday is excluded, the range is split around it, and all requested hours land on the remaining days |
 | `testPerCategoryHoursMatchConfiguredPercentages` | Hours allocated to each category exactly match the configured percentages — cat1 receives 60% and cat2 receives 40% of total hours, verified per-category not just as an aggregate total |

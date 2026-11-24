@@ -402,23 +402,65 @@ public class ScheduleHoursDistributorTest {
         Date cat2RangeStart = Date.newInstance(2025, 2, 8);
         Date cat2RangeEnd = Date.newInstance(2025, 3, 7);
 
-        // Sum < 100: 30 + 20 = 50 -> missing 50 split evenly -> 55 / 45
+        // Sum < 100: 30 + 20 = 50 -> scaled proportionally -> 60 / 40
         ScheduleHoursDistributor.ScheduleInput under = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);
         setWeeks(under, 4, 4, 0, 0);
         setPercentages(under, 30, 20, 10, 10); // cat3/post percentages are ignored because those categories are invalid
         List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> r1 = run(under);
         System.assertEquals(null, r1[0].errorMessage);
-        System.assertEquals(55, sumScheduledHours(r1[0].scheduleExceptions, cat1RangeStart, cat1RangeEnd), 'Cat1 should be normalized to 55%');
-        System.assertEquals(45, sumScheduledHours(r1[0].scheduleExceptions, cat2RangeStart, cat2RangeEnd), 'Cat2 should be normalized to 45%');
+        System.assertEquals(60, sumScheduledHours(r1[0].scheduleExceptions, cat1RangeStart, cat1RangeEnd), 'Cat1 should be normalized to 60% (30/50)');
+        System.assertEquals(40, sumScheduledHours(r1[0].scheduleExceptions, cat2RangeStart, cat2RangeEnd), 'Cat2 should be normalized to 40% (20/50)');
 
-        // Sum > 100: 90 + 30 = 120 -> excess 20 removed evenly -> 80 / 20
+        // Sum > 100: 90 + 30 = 120 -> scaled proportionally -> 75 / 25
         ScheduleHoursDistributor.ScheduleInput over = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);
         setWeeks(over, 4, 4, 0, 0);
         setPercentages(over, 90, 30, 10, 10);
         List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> r2 = run(over);
         System.assertEquals(null, r2[0].errorMessage);
-        System.assertEquals(80, sumScheduledHours(r2[0].scheduleExceptions, cat1RangeStart, cat1RangeEnd), 'Cat1 should be normalized to 80%');
-        System.assertEquals(20, sumScheduledHours(r2[0].scheduleExceptions, cat2RangeStart, cat2RangeEnd), 'Cat2 should be normalized to 20%');
+        System.assertEquals(75, sumScheduledHours(r2[0].scheduleExceptions, cat1RangeStart, cat1RangeEnd), 'Cat1 should be normalized to 75% (90/120)');
+        System.assertEquals(25, sumScheduledHours(r2[0].scheduleExceptions, cat2RangeStart, cat2RangeEnd), 'Cat2 should be normalized to 25% (30/120)');
+    }
+
+    @isTest
+    static void testAllZeroPercentagesSplitEvenly() {
+        // Cat1 = 2025-01-11..2025-02-07 and Cat2 = 2025-02-08..2025-03-07, 20 weekdays each
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);
+        setWeeks(input, 4, 4, 0, 0);
+        setPercentages(input, 0, 0, 0, 0);
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
+        System.assertEquals(null, result[0].errorMessage);
+        System.assertEquals(50, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 1, 11), Date.newInstance(2025, 2, 7)), 'All-zero percentages should split evenly (Cat1)');
+        System.assertEquals(50, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 2, 8), Date.newInstance(2025, 3, 7)), 'All-zero percentages should split evenly (Cat2)');
+    }
+
+    @isTest
+    static void testZeroWeekCategoryInMiddleDoesNotDistortShares() {
+        // Cat3 = 2025-02-22..2025-03-07 (10 weekdays), Cat2 = 0 weeks (empty), Cat1 = 2025-01-25..2025-02-21 (20 weekdays)
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);
+        setWeeks(input, 4, 0, 2, 0);
+        setPercentages(input, 60, 30, 20, 0); // Cat2's 30% must not influence the Cat1 : Cat3 ratio of 60 : 20
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
+        System.assertEquals(null, result[0].errorMessage);
+        System.assertEquals(75, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 1, 25), Date.newInstance(2025, 2, 21)), 'Cat1 should get 60/80 = 75%');
+        System.assertEquals(25, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 2, 22), Date.newInstance(2025, 3, 7)), 'Cat3 should get 20/80 = 25%');
+        System.assertEquals(100, sumScheduledHours(result[0].scheduleExceptions), 'All hours should be scheduled');
+    }
+
+    @isTest
+    static void testCategoryWithNoUsableDaysIsExcludedFromShares() {
+        // Cat3 = 2025-03-01..2025-03-07 but its weekdays are all holidays; Cat2 = 2025-02-01..2025-02-28; Cat1 = 2025-01-06..2025-01-31
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);
+        setWeeks(input, 4, 4, 1, 0);
+        setPercentages(input, 60, 20, 30, 0);
+        input.existingExceptions = new List<pse__Schedule_Exception__c>{ zeroHourException(null, Date.newInstance(2025, 3, 3), Date.newInstance(2025, 3, 7)) };
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
+        System.assertEquals(null, result[0].errorMessage);
+        System.assertEquals(75, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 31)), 'Cat1 should get 60/80 = 75%');
+        System.assertEquals(25, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 2, 1), Date.newInstance(2025, 2, 28)), 'Cat2 should get 20/80 = 25%');
+        System.assertEquals(0, sumScheduledHours(result[0].scheduleExceptions, Date.newInstance(2025, 3, 1), Date.newInstance(2025, 3, 7)), 'Cat3 has no usable days and gets nothing');
     }
 
     @isTest
