@@ -86,6 +86,16 @@ public with sharing class ScheduleHoursDistributor {
             );
         }
 
+        // 6. Zero-hour exceptions for days not covered by any category, the gap week or an existing exception
+        //    (e.g. before Cat1 or after Post), so the schedule's base hours never add to the requested total.
+        Set<Date> coveredDates = new Set<Date>(holidayDates);
+        for (pse__Schedule_Exception__c exc : allExceptions) {
+            for (Date d = exc.pse__Date__c; d <= exc.pse__End_Date__c; d = d.addDays(1)) {
+                coveredDates.add(d);
+            }
+        }
+        allExceptions.addAll(buildSplitExceptions(input.startDate, input.endDate, 0, workDays, input.scheduleId, input.startDate, input.endDate, coveredDates));
+
         if (DEBUG) {
             for (CategoryPlan plan : plans) {
                 System.debug(plan);

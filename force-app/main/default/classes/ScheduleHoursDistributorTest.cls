@@ -127,6 +127,21 @@ public class ScheduleHoursDistributorTest {
         return sumScheduledHours(exceptions, null, null);
     }
 
+    // Asserts every day in [rangeStart, rangeEnd] is covered by exactly one generated exception, or by none if blocked.
+    private static void assertEveryDayCoveredOnce(List<pse__Schedule_Exception__c> exceptions, Set<Date> blockedDates, Date rangeStart, Date rangeEnd) {
+        Map<Date, Integer> coverage = new Map<Date, Integer>();
+        for (pse__Schedule_Exception__c exc : exceptions) {
+            for (Date d = exc.pse__Date__c; d <= endOf(exc); d = d.addDays(1)) {
+                coverage.put(d, (coverage.containsKey(d) ? coverage.get(d) : 0) + 1);
+            }
+        }
+        for (Date d = rangeStart; d <= rangeEnd; d = d.addDays(1)) {
+            Integer generated = coverage.containsKey(d) ? coverage.get(d) : 0;
+            Integer expected = blockedDates.contains(d) ? 0 : 1;
+            System.assertEquals(expected, generated, 'Unexpected number of generated exceptions covering ' + d);
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Happy path / validation
     // ---------------------------------------------------------------------
@@ -361,18 +376,18 @@ public class ScheduleHoursDistributorTest {
 
         Boolean foundPostStart = false;
         Boolean foundPostEnd = false;
-        Boolean foundAfterPostEnd = false;
         for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
             Date s = exc.pse__Date__c;
             Date e = endOf(exc);
             if (s == expectedPostStart) foundPostStart = true;
             if (e == expectedPostEnd) foundPostEnd = true;
-            if (s > expectedPostEnd || e > expectedPostEnd) foundAfterPostEnd = true;
+            System.assert(s > expectedPostEnd || e <= expectedPostEnd, 'No exception may straddle the Post end date: ' + s + ' - ' + e);
         }
 
         System.assertEquals(true, foundPostStart, 'Post category must start exactly on 2025-02-10 (day after onsite gap week ends)');
         System.assertEquals(true, foundPostEnd, 'Post category must end exactly on 2025-02-23 (postWeeks × 7 days = 14 days from post start)');
-        System.assertEquals(false, foundAfterPostEnd, 'No generated exception should extend beyond the postWeeks-derived end date');
+        System.assertEquals(0, sumScheduledHours(result[0].scheduleExceptions, expectedPostEnd.addDays(1), input.endDate), 'Days after Post are zero-filled');
+        System.assertEquals(120, sumScheduledHours(result[0].scheduleExceptions), 'All requested hours land inside the categories');
     }
 
     @isTest
@@ -581,6 +596,43 @@ public class ScheduleHoursDistributorTest {
     }
 
     @isTest
+    static void testUncoveredDaysBeforeCat1AreZeroFilled() {
+        // Cat1 starts 2025-01-11, so 2025-01-06 .. 2025-01-10 is outside every category
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 3, 7), 100);
+        setWeeks(input, 4, 4, 0, 0);
+        setPercentages(input, 60, 40, 0, 0);
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
+        System.assertEquals(null, result[0].errorMessage);
+
+        pse__Schedule_Exception__c fill = null;
+        for (pse__Schedule_Exception__c exc : result[0].scheduleExceptions) {
+            if (exc.pse__Date__c == Date.newInstance(2025, 1, 6)) fill = exc;
+        }
+        System.assertNotEquals(null, fill, 'A fill exception must start on the schedule start date');
+        System.assertEquals(Date.newInstance(2025, 1, 10), fill.pse__End_Date__c, 'Fill must stop the day before Cat1 starts');
+        System.assertEquals(0, sumScheduledHours(new List<pse__Schedule_Exception__c>{ fill }), 'Fill exception carries zero hours');
+        assertEveryDayCoveredOnce(result[0].scheduleExceptions, new Set<Date>(), input.startDate, input.endDate);
+        System.assertEquals(100, sumScheduledHours(result[0].scheduleExceptions), 'Total is still exactly the requested hours');
+    }
+
+    @isTest
+    static void testEveryDayCoveredOnceWithOnsiteAndHolidays() {
+        List<pse__Schedule_Exception__c> holidays = [SELECT Id, pse__Date__c, pse__End_Date__c FROM pse__Schedule_Exception__c];
+        ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 1), Date.newInstance(2025, 7, 1), 200);
+        setWeeks(input, 11, 8, 6, 4);
+        setPercentages(input, 25, 30, 40, 5);
+        input.onsiteStartDate = Date.newInstance(2025, 3, 1);
+        input.onsiteEndDate = Date.newInstance(2025, 3, 14);
+        input.existingExceptions = holidays;
+
+        List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
+        System.assertEquals(null, result[0].errorMessage);
+        assertEveryDayCoveredOnce(result[0].scheduleExceptions, ScheduleHoursDistributor.extractHolidayDates(holidays), input.startDate, input.endDate);
+        System.assertEquals(200, sumScheduledHours(result[0].scheduleExceptions), 'Total is exactly the requested hours');
+    }
+
+    @isTest
     static void testCapacityCapAndOverflowDropped_NoError() {
         // 300h requested over 5 weekdays; capacity is 5 × 24 = 120h
         ScheduleHoursDistributor.ScheduleInput input = buildInput(schedule2025Id(), Date.newInstance(2025, 1, 6), Date.newInstance(2025, 1, 10), 300);
@@ -719,7 +771,11 @@ public class ScheduleHoursDistributorTest {
         List<ScheduleHoursDistributor.ScheduleExceptionOutputWrapper> result = run(input);
         System.assertEquals(1, result.size());
         System.assertEquals(null, result[0].errorMessage);
-        System.assertEquals(0, result[0].scheduleExceptions.size(), 'No categories valid -> expect zero generated exceptions');
+        // No categories valid -> the whole range is a single zero-hour fill exception
+        System.assertEquals(1, result[0].scheduleExceptions.size(), 'Expect one zero-hour fill exception');
+        System.assertEquals(Date.newInstance(2025, 1, 1), result[0].scheduleExceptions[0].pse__Date__c);
+        System.assertEquals(Date.newInstance(2025, 1, 10), result[0].scheduleExceptions[0].pse__End_Date__c);
+        System.assertEquals(0, sumScheduledHours(result[0].scheduleExceptions), 'Fill exception carries zero hours');
     }
 
     @isTest
